@@ -1,0 +1,39 @@
+# Service account keys — NEVER commit these
+*.json
+!package.json
+
+# Apple auth key
+*.p8
+
+# Environment secrets
+env.sh
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+env/
+venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Data exports (large CSVs)
+power_bi_data/
+*.csv
+*.textClipping
+
+# Jupyter notebooks
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
