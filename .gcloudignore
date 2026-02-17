@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+env/
+venv/
+
+# Data exports
+power_bi_data/
+*.csv
+
+# Jupyter
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Apple auth key
+*.p8
+
+# Other service account keys (keep only the one we need)
+rcwl-development-411148702cb5.json
+
+# Auth database
+*.db
+*.textClipping
