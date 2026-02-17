@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from data import load_leads_sales, load_demo_calls, load_meta_ads, load_tiktok_ads
+from auth import require_auth, logout_button
 from kliq_ui_kit import (
     inject_css,
     register_plotly_template,
@@ -25,6 +26,8 @@ from kliq_ui_kit import (
 st.set_page_config(page_title="Leads & Sales", layout="wide")
 inject_css()
 register_plotly_template()
+require_auth()
+logout_button()
 
 st.title("Leads & Sales")
 st.caption("Weekly time series — replaces the manual tracking spreadsheet")

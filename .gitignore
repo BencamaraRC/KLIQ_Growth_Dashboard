@@ -8,6 +8,9 @@
 # Environment secrets
 env.sh
 
+# Auth database
+*.db
+
 # Python
 __pycache__/
 *.pyc

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from auth import require_auth, logout_button
 from kliq_ui_kit import (
     inject_css,
     register_plotly_template,
@@ -37,6 +38,8 @@ from data import (
 st.set_page_config(page_title="Activation — KLIQ", page_icon="🚀", layout="wide")
 inject_css()
 register_plotly_template()
+require_auth()
+logout_button()
 st.title("Activation & Churn Prediction")
 st.markdown("---")
 

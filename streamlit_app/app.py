@@ -15,6 +15,7 @@ from kliq_ui_kit import (
     LIME,
     ALPINE,
 )
+from auth import require_auth, show_admin_panel, logout_button
 
 st.set_page_config(
     page_title="KLIQ Growth Dashboard",
@@ -26,8 +27,13 @@ st.set_page_config(
 inject_css()
 register_plotly_template()
 
+# ── Auth Gate ──
+require_auth()
+logout_button()
+
 # ── Home Page ──
 st.title("KLIQ Growth Dashboard")
+show_admin_panel()
 st.markdown("---")
 
 col1, col2, col3 = st.columns(3)
