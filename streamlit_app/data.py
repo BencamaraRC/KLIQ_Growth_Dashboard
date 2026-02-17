@@ -47,9 +47,18 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import google.auth
 
-SERVICE_ACCOUNT_KEY = os.environ.get("GCP_SERVICE_ACCOUNT_KEY", "")
-PROJECT = "rcwl-data"
+JOB_PROJECT = (
+    "rcwl-development"  # project where jobs run (SA has bigquery.jobs.create here)
+)
+DATA_PROJECT = "rcwl-data"  # project where data lives
 DATASET = "powerbi_dashboard"
+
+# Locate service account key: env var → project root → fallback to ADC
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEFAULT_KEY = os.path.join(_PROJECT_ROOT, "rcwl-development-0c013e9b5c2b.json")
+SERVICE_ACCOUNT_KEY = os.environ.get("GCP_SERVICE_ACCOUNT_KEY", "") or (
+    _DEFAULT_KEY if os.path.exists(_DEFAULT_KEY) else ""
+)
 
 
 @st.cache_resource
@@ -60,7 +69,7 @@ def get_client(location="EU"):
         )
     else:
         creds, _ = google.auth.default()
-    return bigquery.Client(credentials=creds, project=PROJECT, location=location)
+    return bigquery.Client(credentials=creds, project=JOB_PROJECT, location=location)
 
 
 @st.cache_data(ttl=600)
@@ -72,7 +81,7 @@ def query(sql, location="EU"):
 
 def T(name):
     """Shorthand for full table reference."""
-    return f"`{PROJECT}.{DATASET}.{name}`"
+    return f"`{DATA_PROJECT}.{DATASET}.{name}`"
 
 
 # ── Growth Overview ──

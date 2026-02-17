@@ -11,15 +11,19 @@ import hashlib
 import secrets
 import streamlit as st
 
-DB_PATH = os.environ.get("AUTH_DB_PATH", os.path.join(os.path.dirname(__file__), "users.db"))
-ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get(
-    "ADMIN_EMAILS", "ben@joinkliq.io"
-).split(",")]
+DB_PATH = os.environ.get(
+    "AUTH_DB_PATH", os.path.join(os.path.dirname(__file__), "users.db")
+)
+ADMIN_EMAILS = [
+    e.strip().lower()
+    for e in os.environ.get("ADMIN_EMAILS", "ben@joinkliq.io").split(",")
+]
 
 
 def _get_db():
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
@@ -29,7 +33,8 @@ def _get_db():
             status TEXT NOT NULL DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+    """
+    )
     conn.commit()
     return conn
 
@@ -90,7 +95,9 @@ def get_pending_users() -> list[dict]:
         "SELECT id, email, full_name, created_at FROM users WHERE status = 'pending' ORDER BY created_at DESC"
     ).fetchall()
     conn.close()
-    return [{"id": r[0], "email": r[1], "full_name": r[2], "created_at": r[3]} for r in rows]
+    return [
+        {"id": r[0], "email": r[1], "full_name": r[2], "created_at": r[3]} for r in rows
+    ]
 
 
 def get_all_users() -> list[dict]:
@@ -99,7 +106,16 @@ def get_all_users() -> list[dict]:
         "SELECT id, email, full_name, status, created_at FROM users ORDER BY created_at DESC"
     ).fetchall()
     conn.close()
-    return [{"id": r[0], "email": r[1], "full_name": r[2], "status": r[3], "created_at": r[4]} for r in rows]
+    return [
+        {
+            "id": r[0],
+            "email": r[1],
+            "full_name": r[2],
+            "status": r[3],
+            "created_at": r[4],
+        }
+        for r in rows
+    ]
 
 
 def update_user_status(user_id: int, status: str):
@@ -139,17 +155,26 @@ def require_auth():
 
 def _show_login_page():
     """Render the login/register UI."""
-    from kliq_ui_kit import inject_css, GREEN, DARK, IVORY, NEUTRAL
+    from kliq_ui_kit import (
+        inject_css,
+        GREEN,
+        DARK,
+        IVORY,
+        NEUTRAL,
+        BG_CARD,
+        SHADOW_CARD,
+        CARD_RADIUS,
+    )
 
     inject_css()
 
     st.markdown(
         f"""
-        <div style="text-align:center; padding:40px 0 20px;">
-            <h1 style="font-size:2.5rem; font-weight:700; color:{DARK}; margin:0;">
+        <div style="text-align:center; padding:48px 0 24px;">
+            <h1 style="font-size:20px; font-weight:700; color:{DARK}; margin:0; letter-spacing:0;">
                 KLIQ Growth Dashboard
             </h1>
-            <p style="color:{NEUTRAL}; font-size:16px; margin-top:8px;">
+            <p style="color:{NEUTRAL}; font-size:13px; margin-top:8px; font-weight:500;">
                 Sign in to access the dashboard
             </p>
         </div>
@@ -173,9 +198,13 @@ def _show_login_page():
                     if not success:
                         st.error("Invalid email or password.")
                     elif status == "pending":
-                        st.warning("Your account is pending admin approval. Please check back later.")
+                        st.warning(
+                            "Your account is pending admin approval. Please check back later."
+                        )
                     elif status == "rejected":
-                        st.error("Your access request has been declined. Contact an admin.")
+                        st.error(
+                            "Your access request has been declined. Contact an admin."
+                        )
                     elif status == "approved":
                         st.session_state.authenticated = True
                         st.session_state.user_email = email.strip().lower()
@@ -188,7 +217,9 @@ def _show_login_page():
             reg_email = st.text_input("Work Email")
             reg_password = st.text_input("Create Password", type="password")
             reg_password2 = st.text_input("Confirm Password", type="password")
-            reg_submitted = st.form_submit_button("Request Access", use_container_width=True)
+            reg_submitted = st.form_submit_button(
+                "Request Access", use_container_width=True
+            )
 
             if reg_submitted:
                 if not reg_name or not reg_email or not reg_password:
@@ -231,13 +262,16 @@ def show_admin_panel():
         all_users = get_all_users()
         if all_users:
             import pandas as pd
+
             users_df = pd.DataFrame(all_users)
-            users_df = users_df.rename(columns={
-                "full_name": "Name",
-                "email": "Email",
-                "status": "Status",
-                "created_at": "Registered",
-            })
+            users_df = users_df.rename(
+                columns={
+                    "full_name": "Name",
+                    "email": "Email",
+                    "status": "Status",
+                    "created_at": "Registered",
+                }
+            )
             st.dataframe(
                 users_df[["Name", "Email", "Status", "Registered"]],
                 use_container_width=True,

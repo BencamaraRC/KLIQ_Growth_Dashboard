@@ -10,6 +10,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY streamlit_app/ ./streamlit_app/
 COPY .streamlit/ ./.streamlit/
 
+# Copy service account key for BigQuery access
+COPY rcwl-development-0c013e9b5c2b.json ./rcwl-development-0c013e9b5c2b.json
+ENV GCP_SERVICE_ACCOUNT_KEY=/app/rcwl-development-0c013e9b5c2b.json
+
 # Expose Streamlit port
 EXPOSE 8080
 
