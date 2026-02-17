@@ -45,6 +45,7 @@ import streamlit as st
 import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
+import google.auth
 
 SERVICE_ACCOUNT_KEY = os.environ.get(
     "GCP_SERVICE_ACCOUNT_KEY", "rcwl-development-0c013e9b5c2b.json"
@@ -55,7 +56,12 @@ DATASET = "powerbi_dashboard"
 
 @st.cache_resource
 def get_client(location="EU"):
-    creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_KEY)
+    if SERVICE_ACCOUNT_KEY and os.path.exists(SERVICE_ACCOUNT_KEY):
+        creds = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_KEY
+        )
+    else:
+        creds, _ = google.auth.default()
     return bigquery.Client(credentials=creds, project=PROJECT, location=location)
 
 
