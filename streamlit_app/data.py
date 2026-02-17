@@ -47,9 +47,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import google.auth
 
-SERVICE_ACCOUNT_KEY = os.environ.get(
-    "GCP_SERVICE_ACCOUNT_KEY", "rcwl-development-0c013e9b5c2b.json"
-)
+SERVICE_ACCOUNT_KEY = os.environ.get("GCP_SERVICE_ACCOUNT_KEY", "")
 PROJECT = "rcwl-data"
 DATASET = "powerbi_dashboard"
 
