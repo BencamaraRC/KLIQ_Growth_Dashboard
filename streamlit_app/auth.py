@@ -72,6 +72,32 @@ def _get_db():
     """
     )
     conn.commit()
+
+    # Bootstrap: ensure admin accounts exist on fresh deployments
+    for admin_email in ADMIN_EMAILS:
+        exists = conn.execute(
+            "SELECT 1 FROM users WHERE email = ?", (admin_email,)
+        ).fetchone()
+        if not exists:
+            _boot_salt = secrets.token_hex(16)
+            _boot_hash = hashlib.pbkdf2_hmac(
+                "sha256",
+                os.environ.get("ADMIN_DEFAULT_PASSWORD", "KLIQ3055!54321").encode(),
+                _boot_salt.encode(),
+                100_000,
+            ).hex()
+            conn.execute(
+                "INSERT INTO users (email, password_hash, salt, full_name, status) "
+                "VALUES (?, ?, ?, ?, 'approved')",
+                (
+                    admin_email,
+                    _boot_hash,
+                    _boot_salt,
+                    admin_email.split("@")[0].title(),
+                ),
+            )
+    conn.commit()
+
     return conn
 
 
