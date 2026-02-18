@@ -687,3 +687,90 @@ def load_feature_frequency():
     ORDER BY avg_days_between ASC
     """
     return query(sql)
+
+
+# Module-type mapping: entity_name values → friendly module names
+MODULE_MAP = {
+    "live_session": "Live Stream",
+    "live_stream": "Live Stream",
+    "past_session": "Live Stream",
+    "session": "Live Stream",
+    "1_to_1": "1-to-1",
+    "program": "Program",
+    "program_workout": "Program",
+    "programs": "Program",
+    "workout_program": "Program",
+    "ecourse": "eCourse",
+    "course": "eCourse",
+    "library": "Collections",
+    "wellness": "Blog",
+    "blog": "Blog",
+    "nutrition": "Recipe",
+    "recipe": "Recipe",
+    "community": "Community",
+    "health_device_connected": "Integrations",
+    "product": "Subscriptions",
+    "inapp_purchase_detail_page": "Subscriptions",
+}
+
+
+@st.cache_data(ttl=600)
+def load_module_adoption():
+    """Module-level adoption: which apps use which KLIQ modules, event counts, and uptake."""
+    sql = f"""
+    SELECT
+        e.entity_name,
+        a.application_name,
+        COUNT(*) AS event_count,
+        COUNT(DISTINCT FORMAT_DATE('%Y-%m', DATE(e.event_date))) AS months_active,
+        MIN(DATE(e.event_date)) AS first_used,
+        MAX(DATE(e.event_date)) AS last_used
+    FROM `{DATA_PROJECT}.prod_dataset.events` e
+    LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+    WHERE a.application_name IS NOT NULL
+      AND e.entity_name IS NOT NULL
+      AND e.entity_name != ''
+      AND e.entity_name NOT IN ('app_opened', 'onboarding', 'self_serve', 'temp_self_serve',
+                                 'self_serve_product', 'user', 'customer_behaviour',
+                                 'application', 'package')
+    GROUP BY e.entity_name, a.application_name
+    ORDER BY event_count DESC
+    """
+    return query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_module_monthly_trend():
+    """Monthly event counts per module type across the platform."""
+    sql = f"""
+    SELECT
+        e.entity_name,
+        FORMAT_DATE('%Y-%m', DATE(e.event_date)) AS month,
+        COUNT(*) AS event_count,
+        COUNT(DISTINCT a.application_name) AS apps_active
+    FROM `{DATA_PROJECT}.prod_dataset.events` e
+    LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+    WHERE a.application_name IS NOT NULL
+      AND e.entity_name IS NOT NULL
+      AND e.entity_name != ''
+      AND e.entity_name NOT IN ('app_opened', 'onboarding', 'self_serve', 'temp_self_serve',
+                                 'self_serve_product', 'user', 'customer_behaviour',
+                                 'application', 'package')
+    GROUP BY e.entity_name, month
+    ORDER BY month, event_count DESC
+    """
+    return query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_coach_types():
+    """Coach type from onboarding (coach_type_updated event, data.coach_type field)."""
+    sql = f"""
+    SELECT
+        DATE(event_date) AS event_date,
+        JSON_EXTRACT_SCALAR(data, '$.coach_type') AS coach_type
+    FROM `{DATA_PROJECT}.prod_dataset.events`
+    WHERE event_name = 'coach_type_updated'
+      AND data IS NOT NULL
+    """
+    return query(sql)

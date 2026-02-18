@@ -33,6 +33,7 @@ from data import (
     load_cohort_retention,
     load_churn_analysis,
     load_app_lookup,
+    load_coach_types,
 )
 
 st.set_page_config(page_title="Activation — KLIQ", page_icon="🚀", layout="wide")
@@ -120,6 +121,55 @@ k3.metric(
 )
 k4.metric("Avg Activation Score", f"{avg_score:.0f}/100")
 k5.metric("Avg Actions Done", f"{avg_actions:.1f}/11")
+
+st.markdown("---")
+
+# ── Coach Type Breakdown ──
+st.subheader("🎯 Coach Type Breakdown")
+st.caption("What type of coach signed up during onboarding")
+
+coach_type_raw = load_coach_types()
+if not coach_type_raw.empty:
+    ct_df = coach_type_raw.copy()
+    ct_df["event_date"] = pd.to_datetime(ct_df["event_date"])
+    ct_df = ct_df[
+        ct_df["coach_type"].notna()
+        & (ct_df["coach_type"] != "")
+        & (ct_df["coach_type"].str.lower() != "test")
+    ]
+
+    if not ct_df.empty:
+        # Use the sidebar time filter
+        cutoff = datetime.now() - timedelta(days=time_days)
+        ct_filtered = ct_df[ct_df["event_date"] >= cutoff]
+
+        if not ct_filtered.empty:
+            cat_counts = (
+                ct_filtered.groupby("coach_type")
+                .size()
+                .reset_index(name="count")
+                .sort_values("count", ascending=False)
+            )
+
+            fig_ct = px.bar(
+                cat_counts,
+                x="coach_type",
+                y="count",
+                color="coach_type",
+                color_discrete_sequence=CHART_SEQUENCE,
+                labels={"coach_type": "Coach Type", "count": "Sign-ups"},
+                title=f"Coach Types at Onboarding — {time_filter}",
+                text="count",
+            )
+            fig_ct.update_traces(texttemplate="%{text:,}", textposition="outside")
+            fig_ct.update_layout(height=400, showlegend=False)
+            st.plotly_chart(fig_ct, use_container_width=True)
+        else:
+            st.info(f"No coach type data in the {time_filter.lower()}.")
+    else:
+        st.info("No coach type data available yet.")
+else:
+    st.info("No coach type data available yet.")
 
 st.markdown("---")
 

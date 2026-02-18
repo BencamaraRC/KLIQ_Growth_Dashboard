@@ -37,6 +37,9 @@ from data import (
     load_feature_monthly_trend,
     load_total_coach_apps,
     load_feature_frequency,
+    load_module_adoption,
+    load_module_monthly_trend,
+    MODULE_MAP,
     FEATURE_LABELS,
 )
 
@@ -57,6 +60,8 @@ with st.spinner("Loading feature data from BigQuery..."):
     trend_df = load_feature_monthly_trend()
     total_coach_apps = load_total_coach_apps()
     freq_df = load_feature_frequency()
+    module_df = load_module_adoption()
+    module_trend_df = load_module_monthly_trend()
 
 
 def label(event_name):
@@ -561,6 +566,213 @@ if not trend_df.empty:
         )
         fig_apps.update_layout(height=400)
         st.plotly_chart(fig_apps, use_container_width=True)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  SECTION 1.5: MODULE ADOPTION BREAKDOWN
+# ═══════════════════════════════════════════════════════════════
+st.markdown("---")
+st.markdown(
+    section_header(
+        "Module Adoption Breakdown",
+        "Which KLIQ modules are coaches actually using — and how widely adopted is each one?",
+    ),
+    unsafe_allow_html=True,
+)
+
+if not module_df.empty and total_coach_apps > 0:
+    # Map entity_name → module name and aggregate
+    mod = module_df.copy()
+    mod["module"] = mod["entity_name"].map(MODULE_MAP).fillna("Other")
+    mod = mod[mod["module"] != "Other"]
+
+    # Aggregate per module
+    mod_summary = (
+        mod.groupby("module")
+        .agg(
+            total_events=("event_count", "sum"),
+            apps_using=("application_name", "nunique"),
+            avg_months=("months_active", "mean"),
+        )
+        .reset_index()
+    )
+    mod_summary["uptake_pct"] = (
+        mod_summary["apps_using"] / total_coach_apps * 100
+    ).round(1)
+    mod_summary = mod_summary.sort_values("uptake_pct", ascending=False)
+
+    # Module order for consistent display
+    MODULE_ORDER = [
+        "Live Stream",
+        "1-to-1",
+        "Program",
+        "eCourse",
+        "Collections",
+        "Blog",
+        "Recipe",
+        "Community",
+        "Integrations",
+        "Subscriptions",
+    ]
+
+    # ── KPI cards: one per module ──
+    row1 = mod_summary.head(5)
+    row2 = mod_summary.iloc[5:10] if len(mod_summary) > 5 else pd.DataFrame()
+
+    cols = st.columns(5)
+    for i, (_, row) in enumerate(row1.iterrows()):
+        with cols[i]:
+            pct = row["uptake_pct"]
+            bg = GREEN if pct >= 40 else (ALPINE if pct >= 20 else TANGERINE)
+            st.markdown(
+                _card.format(
+                    bg=bg,
+                    fg=IVORY,
+                    r=CARD_RADIUS,
+                    shadow=SHADOW_CARD,
+                    label=row["module"],
+                    value=f"{pct:.1f}%",
+                    desc=f"{row['apps_using']:,.0f} apps · {row['total_events']:,.0f} events",
+                ),
+                unsafe_allow_html=True,
+            )
+
+    if not row2.empty:
+        st.markdown("")
+        cols2 = st.columns(5)
+        for i, (_, row) in enumerate(row2.iterrows()):
+            with cols2[i]:
+                pct = row["uptake_pct"]
+                bg = GREEN if pct >= 40 else (ALPINE if pct >= 20 else TANGERINE)
+                st.markdown(
+                    _card.format(
+                        bg=bg,
+                        fg=IVORY,
+                        r=CARD_RADIUS,
+                        shadow=SHADOW_CARD,
+                        label=row["module"],
+                        value=f"{pct:.1f}%",
+                        desc=f"{row['apps_using']:,.0f} apps · {row['total_events']:,.0f} events",
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+    st.markdown("")
+
+    # ── Pie chart + bar chart ──
+    col_mod_pie, col_mod_bar = st.columns(2)
+
+    with col_mod_pie:
+        fig_mod_pie = px.pie(
+            mod_summary,
+            values="apps_using",
+            names="module",
+            title="Coach Uptake by Module (# of Apps)",
+            color_discrete_sequence=CHART_SEQUENCE,
+            hole=0.4,
+        )
+        fig_mod_pie.update_traces(textinfo="label+percent", textposition="outside")
+        fig_mod_pie.update_layout(height=450, showlegend=False)
+        st.plotly_chart(fig_mod_pie, use_container_width=True)
+
+    with col_mod_bar:
+        fig_mod_bar = px.bar(
+            mod_summary.sort_values("uptake_pct", ascending=True),
+            x="uptake_pct",
+            y="module",
+            orientation="h",
+            color="total_events",
+            color_continuous_scale=["#e8f5e9", GREEN],
+            labels={
+                "uptake_pct": "Coach Uptake %",
+                "module": "",
+                "total_events": "Total Events",
+            },
+            title="Module Uptake % (of all coach apps)",
+            text="uptake_pct",
+        )
+        fig_mod_bar.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+        fig_mod_bar.update_layout(
+            height=450,
+            margin=dict(l=10, r=40, t=40, b=10),
+        )
+        st.plotly_chart(fig_mod_bar, use_container_width=True)
+
+    # ── Events pie: share of total events by module ──
+    col_evt_pie, col_mod_table = st.columns([2, 3])
+
+    with col_evt_pie:
+        fig_evt_pie = px.pie(
+            mod_summary,
+            values="total_events",
+            names="module",
+            title="Share of Total Events by Module",
+            color_discrete_sequence=CHART_SEQUENCE,
+            hole=0.4,
+        )
+        fig_evt_pie.update_traces(textinfo="label+percent", textposition="outside")
+        fig_evt_pie.update_layout(height=400, showlegend=False)
+        st.plotly_chart(fig_evt_pie, use_container_width=True)
+
+    with col_mod_table:
+        st.markdown("**Module Adoption Summary**")
+        tbl = mod_summary[
+            ["module", "apps_using", "uptake_pct", "total_events", "avg_months"]
+        ].rename(
+            columns={
+                "module": "Module",
+                "apps_using": "Apps Using",
+                "uptake_pct": "Uptake %",
+                "total_events": "Total Events",
+                "avg_months": "Avg Months Active",
+            }
+        )
+        tbl["Apps Using"] = tbl["Apps Using"].apply(lambda x: f"{x:,}")
+        tbl["Total Events"] = tbl["Total Events"].apply(lambda x: f"{x:,.0f}")
+        tbl["Uptake %"] = tbl["Uptake %"].apply(lambda x: f"{x:.1f}%")
+        tbl["Avg Months Active"] = tbl["Avg Months Active"].apply(lambda x: f"{x:.1f}")
+        st.dataframe(tbl, use_container_width=True, hide_index=True)
+
+    # ── Module monthly trend ──
+    st.markdown("")
+    st.markdown("**Module Usage Over Time**")
+
+    if not module_trend_df.empty:
+        mt = module_trend_df.copy()
+        mt["module"] = mt["entity_name"].map(MODULE_MAP).fillna("Other")
+        mt = mt[mt["module"] != "Other"]
+        mt_agg = (
+            mt.groupby(["module", "month"])
+            .agg(
+                event_count=("event_count", "sum"),
+                apps_active=("apps_active", "sum"),
+            )
+            .reset_index()
+        )
+
+        fig_mod_trend = px.line(
+            mt_agg,
+            x="month",
+            y="event_count",
+            color="module",
+            title="Monthly Events by Module",
+            labels={"event_count": "Events", "month": "Month", "module": "Module"},
+            color_discrete_sequence=CHART_SEQUENCE,
+        )
+        fig_mod_trend.update_layout(height=450)
+        st.plotly_chart(fig_mod_trend, use_container_width=True)
+
+        fig_mod_apps = px.line(
+            mt_agg,
+            x="month",
+            y="apps_active",
+            color="module",
+            title="Monthly Active Apps by Module",
+            labels={"apps_active": "Active Apps", "month": "Month", "module": "Module"},
+            color_discrete_sequence=CHART_SEQUENCE,
+        )
+        fig_mod_apps.update_layout(height=400)
+        st.plotly_chart(fig_mod_apps, use_container_width=True)
 
 
 # ═══════════════════════════════════════════════════════════════
