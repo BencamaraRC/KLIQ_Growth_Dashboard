@@ -64,7 +64,7 @@ with col1:
             r=CARD_RADIUS,
             shadow=SHADOW_CARD,
             label="Navigate Using The Sidebar",
-            value="7 Pages",
+            value="9 Pages",
             desc="Full growth analytics suite",
         ),
         unsafe_allow_html=True,
@@ -111,5 +111,7 @@ st.markdown(
 | **5 — App Health** | MAU/DAU, user overview, engagement, subscriptions, device breakdown, user location |
 | **6 — GMV Table** | Per-coach monthly GMV revenue, total GMV, avg LTV per app, avg rev per app last month |
 | **7 — Leads & Sales** | Meta Ads leads, demo calls, acquisition funnel, revenue, cancellations, weekly data table |
+| **8 — Growth Strategy** | Clusters, retention, LTV, paid ad ROI simulator, growth ladder, revenue projections |
+| **9 — Feature Adoption** | Per-app feature usage, platform-wide adoption, category breakdown, monthly trends, app vs platform comparison |
 """
 )

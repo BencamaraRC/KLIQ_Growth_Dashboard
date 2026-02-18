@@ -297,3 +297,393 @@ def load_invoice_revenue():
 
 def load_appfee_revenue():
     return query(f"SELECT * FROM {T('d1_appfee_revenue')}")
+
+
+# ── Coach Growth Strategy ──
+
+_FX_CTE = """
+    fx_rates AS (
+        SELECT currency, rate FROM UNNEST([
+            STRUCT("USD" AS currency, 1.0 AS rate),
+            STRUCT("GBP", 1.27), STRUCT("EUR", 1.08), STRUCT("AUD", 0.64),
+            STRUCT("CAD", 0.72), STRUCT("CHF", 1.13), STRUCT("DKK", 0.145),
+            STRUCT("NOK", 0.093), STRUCT("SEK", 0.095), STRUCT("NZD", 0.60),
+            STRUCT("SGD", 0.75), STRUCT("HUF", 0.0027), STRUCT("CLP", 0.00105),
+            STRUCT("COP", 0.00024), STRUCT("CZK", 0.042), STRUCT("PLN", 0.25),
+            STRUCT("BRL", 0.19), STRUCT("MXN", 0.055), STRUCT("TRY", 0.031),
+            STRUCT("RUB", 0.011), STRUCT("ILS", 0.28), STRUCT("SAR", 0.267),
+            STRUCT("AED", 0.272), STRUCT("INR", 0.012), STRUCT("ZAR", 0.054),
+            STRUCT("RON", 0.22)
+        ])
+    )
+"""
+
+
+@st.cache_data(ttl=600)
+def load_growth_strategy_app_stats():
+    """Per-app stats for growth strategy: revenue, engagement, retention, LTV."""
+    sql = f"""
+    WITH {_FX_CTE},
+    sku_map AS (
+        SELECT DISTINCT product_id, application_name
+        FROM {T('d1_inapp_products')}
+    ),
+    apple_rev AS (
+        SELECT COALESCE(m.application_name, 'Unknown') AS app,
+               ROUND(SUM(SAFE_CAST(s.customer_price AS FLOAT64) * COALESCE(fx.rate, 1.0) * SAFE_CAST(s.units AS INT64)), 2) AS apple_sales,
+               COUNT(DISTINCT FORMAT_DATE('%Y-%m', s.report_date)) AS apple_months
+        FROM {T('d1_appstore_sales')} s
+        LEFT JOIN sku_map m ON s.sku = m.product_id
+        LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
+        WHERE s.product_type_identifier IN ('IA1', 'IAY') AND SAFE_CAST(s.customer_price AS FLOAT64) > 0
+        GROUP BY app
+    ),
+    apple_sku_prices AS (
+        SELECT sku,
+            ROUND(AVG(SAFE_CAST(customer_price AS FLOAT64) * COALESCE(fx.rate, 1.0)), 2) AS avg_price_usd
+        FROM {T('d1_appstore_sales')} s
+        LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
+        WHERE s.product_type_identifier IN ('IA1', 'IAY') AND SAFE_CAST(customer_price AS FLOAT64) > 0
+        GROUP BY sku
+    ),
+    ios_avg AS (
+        SELECT ROUND(AVG(SAFE_CAST(customer_price AS FLOAT64) * COALESCE(fx.rate, 1.0)), 2) AS fallback_price
+        FROM {T('d1_appstore_sales')} s
+        LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
+        WHERE s.product_type_identifier IN ('IA1', 'IAY') AND SAFE_CAST(customer_price AS FLOAT64) > 0
+    ),
+    google_rev AS (
+        SELECT a.application_name AS app,
+               ROUND(SUM(COALESCE(ap.avg_price_usd, iavg.fallback_price)), 2) AS google_sales,
+               COUNT(DISTINCT FORMAT_DATE('%Y-%m', DATE(e.event_date))) AS google_months
+        FROM `{DATA_PROJECT}.prod_dataset.events` e
+        LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+        LEFT JOIN apple_sku_prices ap ON JSON_VALUE(e.data, '$.in_app_product_id') = ap.sku
+        CROSS JOIN ios_avg iavg
+        WHERE e.event_name = 'purchase_success' AND a.application_name IS NOT NULL
+        GROUP BY app
+    ),
+    app_events AS (
+        SELECT a.application_name AS app,
+            COUNTIF(e.event_name = 'purchase_success') AS purchases,
+            COUNTIF(e.event_name = 'recurring_payment') AS recurring_payments,
+            COUNTIF(e.event_name = 'user_subscribed') AS new_subscribers,
+            COUNTIF(e.event_name = 'cancels_subscription') AS cancellations,
+            COUNTIF(e.event_name = 'live_session_created') AS livestreams,
+            COUNTIF(e.event_name = 'live_session_joined') AS live_joins,
+            COUNTIF(e.event_name = 'completes_program_workout') AS workouts,
+            COUNTIF(e.event_name IN ('post_on_community', 'post_on_community_feed_with_photo', 'post_on_community_feed_with_voice_notes')) AS community_posts,
+            COUNTIF(e.event_name = 'app_opened') AS app_opens,
+            COUNTIF(e.event_name = 'publish_module') AS modules_published,
+            COUNTIF(e.event_name = 'publishes_program') AS programs_published,
+            COUNT(DISTINCT FORMAT_DATE('%Y-%m', DATE(e.event_date))) AS event_months
+        FROM `{DATA_PROJECT}.prod_dataset.events` e
+        LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+        WHERE a.application_name IS NOT NULL
+        GROUP BY app
+    ),
+    apps_meta AS (
+        SELECT application_name AS app, DATE(created_at) AS created_date
+        FROM `{DATA_PROJECT}.prod_dataset.applications`
+        WHERE application_name IS NOT NULL
+    ),
+    fees AS (
+        SELECT application_name AS app, kliq_fee_pct
+        FROM {T('d1_app_fee_lookup')}
+        WHERE kliq_fee_pct IS NOT NULL
+    )
+    SELECT
+        COALESCE(ae.app, ar.app, gr.app) AS app,
+        am.created_date,
+        COALESCE(ar.apple_sales, 0) + COALESCE(gr.google_sales, 0) AS iap_revenue,
+        COALESCE(ar.apple_sales, 0) AS apple_sales,
+        COALESCE(gr.google_sales, 0) AS google_sales,
+        GREATEST(COALESCE(ar.apple_months, 0), COALESCE(gr.google_months, 0)) AS active_rev_months,
+        COALESCE(ae.purchases, 0) AS purchases,
+        COALESCE(ae.recurring_payments, 0) AS recurring_payments,
+        COALESCE(ae.new_subscribers, 0) AS new_subscribers,
+        COALESCE(ae.cancellations, 0) AS cancellations,
+        COALESCE(ae.livestreams, 0) AS livestreams,
+        COALESCE(ae.live_joins, 0) AS live_joins,
+        COALESCE(ae.workouts, 0) AS workouts,
+        COALESCE(ae.community_posts, 0) AS community_posts,
+        COALESCE(ae.app_opens, 0) AS app_opens,
+        COALESCE(ae.modules_published, 0) AS modules_published,
+        COALESCE(ae.programs_published, 0) AS programs_published,
+        COALESCE(ae.event_months, 0) AS event_months,
+        COALESCE(f.kliq_fee_pct, 0) AS kliq_fee_pct
+    FROM app_events ae
+    FULL OUTER JOIN apple_rev ar ON ae.app = ar.app
+    FULL OUTER JOIN google_rev gr ON COALESCE(ae.app, ar.app) = gr.app
+    LEFT JOIN apps_meta am ON COALESCE(ae.app, ar.app, gr.app) = am.app
+    LEFT JOIN fees f ON COALESCE(ae.app, ar.app, gr.app) = f.app
+    WHERE COALESCE(ae.app_opens, 0) > 0
+    ORDER BY iap_revenue DESC
+    """
+    return query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_growth_strategy_monthly():
+    """Monthly revenue + engagement for cohort/retention analysis."""
+    sql = f"""
+    WITH {_FX_CTE},
+    sku_map AS (
+        SELECT DISTINCT product_id, application_name
+        FROM {T('d1_inapp_products')}
+    ),
+    apple_monthly AS (
+        SELECT COALESCE(m.application_name, 'Unknown') AS app,
+               FORMAT_DATE('%Y-%m', s.report_date) AS month,
+               ROUND(SUM(SAFE_CAST(s.customer_price AS FLOAT64) * COALESCE(fx.rate, 1.0) * SAFE_CAST(s.units AS INT64)), 2) AS sales
+        FROM {T('d1_appstore_sales')} s
+        LEFT JOIN sku_map m ON s.sku = m.product_id
+        LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
+        WHERE s.product_type_identifier IN ('IA1', 'IAY') AND SAFE_CAST(s.customer_price AS FLOAT64) > 0
+        GROUP BY app, month
+    ),
+    apple_sku_prices AS (
+        SELECT sku,
+            ROUND(AVG(SAFE_CAST(customer_price AS FLOAT64) * COALESCE(fx.rate, 1.0)), 2) AS avg_price_usd
+        FROM {T('d1_appstore_sales')} s
+        LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
+        WHERE s.product_type_identifier IN ('IA1', 'IAY') AND SAFE_CAST(customer_price AS FLOAT64) > 0
+        GROUP BY sku
+    ),
+    ios_avg AS (
+        SELECT ROUND(AVG(SAFE_CAST(customer_price AS FLOAT64) * COALESCE(fx.rate, 1.0)), 2) AS fallback_price
+        FROM {T('d1_appstore_sales')} s
+        LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
+        WHERE s.product_type_identifier IN ('IA1', 'IAY') AND SAFE_CAST(customer_price AS FLOAT64) > 0
+    ),
+    google_monthly AS (
+        SELECT a.application_name AS app,
+               FORMAT_DATE('%Y-%m', DATE(e.event_date)) AS month,
+               ROUND(SUM(COALESCE(ap.avg_price_usd, iavg.fallback_price)), 2) AS sales
+        FROM `{DATA_PROJECT}.prod_dataset.events` e
+        LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+        LEFT JOIN apple_sku_prices ap ON JSON_VALUE(e.data, '$.in_app_product_id') = ap.sku
+        CROSS JOIN ios_avg iavg
+        WHERE e.event_name = 'purchase_success' AND a.application_name IS NOT NULL
+        GROUP BY app, month
+    ),
+    combined_rev AS (
+        SELECT app, month, SUM(sales) AS total_sales FROM (
+            SELECT * FROM apple_monthly UNION ALL SELECT * FROM google_monthly
+        ) GROUP BY app, month
+    ),
+    monthly_events AS (
+        SELECT a.application_name AS app,
+            FORMAT_DATE('%Y-%m', DATE(e.event_date)) AS month,
+            COUNTIF(e.event_name = 'user_subscribed') AS new_subs,
+            COUNTIF(e.event_name = 'cancels_subscription') AS cancels,
+            COUNTIF(e.event_name = 'purchase_success') AS purchases,
+            COUNTIF(e.event_name = 'recurring_payment') AS recurring,
+            COUNTIF(e.event_name = 'live_session_created') AS livestreams,
+            COUNTIF(e.event_name = 'app_opened') AS app_opens
+        FROM `{DATA_PROJECT}.prod_dataset.events` e
+        LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+        WHERE a.application_name IS NOT NULL
+        GROUP BY app, month
+    )
+    SELECT
+        COALESCE(r.app, e.app) AS app,
+        COALESCE(r.month, e.month) AS month,
+        COALESCE(r.total_sales, 0) AS total_sales,
+        COALESCE(e.new_subs, 0) AS new_subs,
+        COALESCE(e.cancels, 0) AS cancels,
+        COALESCE(e.purchases, 0) AS purchases,
+        COALESCE(e.recurring, 0) AS recurring,
+        COALESCE(e.livestreams, 0) AS livestreams,
+        COALESCE(e.app_opens, 0) AS app_opens
+    FROM combined_rev r
+    FULL OUTER JOIN monthly_events e ON r.app = e.app AND r.month = e.month
+    WHERE COALESCE(r.total_sales, 0) > 0 OR COALESCE(e.app_opens, 0) > 0
+    ORDER BY app, month
+    """
+    return query(sql)
+
+
+# ── Feature Adoption ──
+
+# Friendly labels for raw event names
+FEATURE_LABELS = {
+    "app_opened": "App Opens",
+    "visits_community_page": "Community Page Visits",
+    "engage_with_blog_post": "Blog Engagement",
+    "visits_blog": "Blog Visits",
+    "visits_library_page": "Library Page Visits",
+    "completes_program_workout": "Workout Completions",
+    "like_on_community_post": "Community Likes",
+    "visits_program_detail_page": "Program Detail Views",
+    "completes_library_video": "Library Video Completions",
+    "visits_program_page": "Program Page Visits",
+    "starts_library_video": "Library Video Starts",
+    "engages_with_recipe": "Recipe Engagement",
+    "ends_library_video": "Library Video Ends",
+    "starts_past_session": "Past Session Starts",
+    "replies_on_community": "Community Replies",
+    "ends_past_session": "Past Session Ends",
+    "commented_in_live_session": "Live Session Comments",
+    "post_on_community_feed_with_photo": "Community Photo Posts",
+    "visits_nutrition_page": "Nutrition Page Visits",
+    "recurring_payment": "Recurring Payments",
+    "live_session_joined": "Live Session Joins",
+    "post_comment_in_past_session": "Past Session Comments",
+    "checkout_completion": "Checkout Completions",
+    "completes_past_session": "Past Session Completions",
+    "start_purchase": "Purchase Starts",
+    "acknowledge_purchase": "Purchase Acknowledged",
+    "starts_program": "Program Starts",
+    "user_subscribed": "New Subscriptions",
+    "favourited_session_video": "Favourited Sessions",
+    "create_module": "Modules Created",
+    "favourites_recipe": "Favourited Recipes",
+    "cancels_subscription": "Cancellations",
+    "post_on_community": "Community Posts",
+    "edit_module": "Modules Edited",
+    "publish_module": "Modules Published",
+    "purchase_cancelled": "Purchase Cancelled",
+    "verify_purchase": "Purchase Verified",
+    "live_session_created": "Live Sessions Created",
+    "purchase_success": "Successful Purchases",
+    "valid_purchase": "Valid Purchases",
+    "saved_post": "Saved Posts",
+    "logged_in_visitor": "Logged-In Visitors",
+    "promo_code_used_talent": "Promo Code Used",
+    "connects_health_device": "Health Device Connected",
+    "visits_course_blog": "Course Blog Visits",
+    "completes_program": "Program Completions",
+    "publishes_program": "Programs Published",
+    "post_on_community_feed_with_voice_notes": "Community Voice Notes",
+    "completed_1_to_1_session": "1-to-1 Sessions Completed",
+    "creates_program": "Programs Created",
+    "1_to_1_session_schedule": "1-to-1 Sessions Scheduled",
+}
+
+
+@st.cache_data(ttl=600)
+def load_feature_adoption_platform():
+    """Platform-wide feature adoption: event counts, unique apps, monthly span."""
+    sql = f"""
+    WITH events AS (
+        SELECT
+            e.event_name,
+            a.application_name,
+            FORMAT_DATE('%Y-%m', DATE(e.event_date)) AS month,
+            COUNT(*) AS cnt
+        FROM `{DATA_PROJECT}.prod_dataset.events` e
+        LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+        WHERE a.application_name IS NOT NULL
+          AND e.event_name NOT LIKE 'onboarding%'
+          AND e.event_name NOT LIKE 'self_serve%'
+        GROUP BY e.event_name, a.application_name, month
+    )
+    SELECT
+        event_name,
+        SUM(cnt) AS total_events,
+        COUNT(DISTINCT application_name) AS apps_using,
+        COUNT(DISTINCT month) AS months_active,
+        MIN(month) AS first_seen,
+        MAX(month) AS last_seen
+    FROM events
+    GROUP BY event_name
+    ORDER BY total_events DESC
+    """
+    return query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_feature_adoption_per_app():
+    """Per-app feature usage: which features each app uses and how much."""
+    sql = f"""
+    SELECT
+        a.application_name AS app,
+        e.event_name,
+        COUNT(*) AS event_count,
+        COUNT(DISTINCT FORMAT_DATE('%Y-%m', DATE(e.event_date))) AS months_used
+    FROM `{DATA_PROJECT}.prod_dataset.events` e
+    LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+    WHERE a.application_name IS NOT NULL
+      AND e.event_name NOT LIKE 'onboarding%'
+      AND e.event_name NOT LIKE 'self_serve%'
+    GROUP BY app, e.event_name
+    ORDER BY app, event_count DESC
+    """
+    return query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_feature_monthly_trend():
+    """Monthly event counts for top features across the platform."""
+    sql = f"""
+    SELECT
+        e.event_name,
+        FORMAT_DATE('%Y-%m', DATE(e.event_date)) AS month,
+        COUNT(*) AS event_count,
+        COUNT(DISTINCT a.application_name) AS apps_active
+    FROM `{DATA_PROJECT}.prod_dataset.events` e
+    LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+    WHERE a.application_name IS NOT NULL
+      AND e.event_name IN (
+        'app_opened', 'visits_community_page', 'engage_with_blog_post',
+        'completes_program_workout', 'live_session_joined', 'live_session_created',
+        'user_subscribed', 'recurring_payment', 'purchase_success',
+        'starts_library_video', 'completes_library_video', 'engages_with_recipe',
+        'post_on_community', 'post_on_community_feed_with_photo',
+        'publish_module', 'publishes_program', 'starts_program',
+        'connects_health_device', 'completed_1_to_1_session'
+      )
+    GROUP BY e.event_name, month
+    ORDER BY month, event_count DESC
+    """
+    return query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_total_coach_apps():
+    """Total number of coach apps on the platform (for uptake % calculation)."""
+    sql = f"""
+    SELECT COUNT(DISTINCT application_name) AS total_apps
+    FROM `{DATA_PROJECT}.prod_dataset.applications`
+    WHERE application_name IS NOT NULL
+    """
+    df = query(sql)
+    return int(df.iloc[0]["total_apps"]) if not df.empty else 0
+
+
+@st.cache_data(ttl=600)
+def load_feature_frequency():
+    """Avg days between feature usage per app — measures engagement cadence."""
+    sql = f"""
+    WITH event_dates AS (
+        SELECT
+            a.application_name AS app,
+            e.event_name,
+            DATE(e.event_date) AS event_date
+        FROM `{DATA_PROJECT}.prod_dataset.events` e
+        LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a ON e.application_id = a.id
+        WHERE a.application_name IS NOT NULL
+          AND e.event_name NOT LIKE 'onboarding%'
+          AND e.event_name NOT LIKE 'self_serve%'
+        GROUP BY app, e.event_name, event_date
+    ),
+    date_gaps AS (
+        SELECT
+            app,
+            event_name,
+            event_date,
+            DATE_DIFF(event_date, LAG(event_date) OVER (PARTITION BY app, event_name ORDER BY event_date), DAY) AS days_gap
+        FROM event_dates
+    )
+    SELECT
+        event_name,
+        ROUND(AVG(days_gap), 1) AS avg_days_between,
+        COUNT(DISTINCT app) AS apps_with_repeat,
+        ROUND(AVG(days_gap) / 7.0, 1) AS avg_weeks_between
+    FROM date_gaps
+    WHERE days_gap IS NOT NULL AND days_gap > 0
+    GROUP BY event_name
+    ORDER BY avg_days_between ASC
+    """
+    return query(sql)
