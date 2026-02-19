@@ -40,3 +40,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+Brand assets/
+prospect-outreach/assets/
+prospect-outreach/output/

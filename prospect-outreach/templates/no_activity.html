@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Hey {{ first_name }},</p>
+
+<p>Just checking in — I noticed you signed up for KLIQ but haven't had a chance to finish setting up yet. No stress at
+    all, just wanted to make sure you didn't get stuck.</p>
+
+<p>Here's where you're at:</p>
+
+<p>
+    {% for step in completed %}
+    ✅ {{ step }}<br>
+    {% endfor %}
+    {% for step in remaining %}
+    ⬜ {{ step }}<br>
+    {% endfor %}
+</p>
+
+<p><strong>You're {{ remaining_count }} step{{ 's' if remaining_count != 1 else '' }} away from being able to earn your
+        first dollar on KLIQ.</strong></p>
+
+{% if next_step %}
+<p>Your next move: <strong>{{ next_step }}</strong>. Should take about 2 minutes.</p>
+{% endif %}
+
+<p>Jump back in and finish setting up your store at <a href="https://admin.joinkliq.io/">admin.joinkliq.io</a> — you're
+    closer than you think.</p>
+
+<p>Honestly, if setting things up isn't your thing — we can just do it for you. We have a white-glove service where my
+    team handles the full setup (branding, first program, pricing, everything). Takes 48 hours and you're launch-ready.
+</p>
+
+<p>Want us to take care of it? <a href="https://calendly.com/joinkliq/kliq-pp-shortlist">Book a quick call here</a> or
+    just reply to this
+    email.</p>
+
+<p>Ben</p>
+{% endblock %}

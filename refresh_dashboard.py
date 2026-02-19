@@ -54,6 +54,9 @@ APPLE_KEY_ID = os.environ.get("APPLE_KEY_ID", "A985D2XN2K")
 APPLE_KEY_FILE = os.environ.get("APPLE_KEY_FILE", "AuthKey_A985D2XN2K.p8")
 APPLE_VENDOR = os.environ.get("APPLE_VENDOR", "88386165")
 
+# ── Google Play Console (GCS bucket for reports) ──
+PLAY_BUCKET_ID = os.environ.get("PLAY_BUCKET_ID", "pubsite_prod_6117430703357331981")
+
 # ── Meta (Facebook) Ads ──
 META_AD_ACCOUNT_ID = os.environ.get("META_AD_ACCOUNT_ID", "act_472085159972709")
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
@@ -2018,6 +2021,340 @@ def refresh_d1_app_top_users():
 
 
 # ═══════════════════════════════════════════════════════════════
+# APPLE ANALYTICS REPORTS API — Impressions, Sessions, Page Views
+# ═══════════════════════════════════════════════════════════════
+
+
+def _apple_analytics_token():
+    """Generate a JWT for the App Store Connect API."""
+    with open(APPLE_KEY_FILE, "r") as f:
+        apple_key = f.read()
+    now = int(time.time())
+    payload = {
+        "iss": APPLE_ISSUER_ID,
+        "iat": now,
+        "exp": now + 1200,
+        "aud": "appstoreconnect-v1",
+    }
+    return jwt.encode(
+        payload, apple_key, algorithm="ES256", headers={"kid": APPLE_KEY_ID}
+    )
+
+
+def _apple_api_get(url, params=None):
+    """Make an authenticated GET request to App Store Connect API."""
+    headers = {"Authorization": f"Bearer {_apple_analytics_token()}"}
+    resp = requests.get(url, headers=headers, params=params or {})
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _apple_api_post(url, body):
+    """Make an authenticated POST request to App Store Connect API."""
+    headers = {
+        "Authorization": f"Bearer {_apple_analytics_token()}",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(url, headers=headers, json=body)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _apple_get_all_apps():
+    """Fetch all apps from App Store Connect, paginating through results."""
+    apps = []
+    url = "https://api.appstoreconnect.apple.com/v1/apps"
+    params = {"limit": 200, "fields[apps]": "name,bundleId"}
+    while url:
+        data = _apple_api_get(url, params)
+        for app in data.get("data", []):
+            apps.append(
+                {
+                    "id": app["id"],
+                    "name": app["attributes"]["name"],
+                    "bundleId": app["attributes"].get("bundleId", ""),
+                }
+            )
+        url = data.get("links", {}).get("next")
+        params = None  # next URL already has params
+    return apps
+
+
+def _apple_ensure_report_request(app_id, access_type="ONGOING"):
+    """Ensure an analytics report request exists for an app. Returns request ID."""
+    # Check existing
+    data = _apple_api_get(
+        f"https://api.appstoreconnect.apple.com/v1/apps/{app_id}/analyticsReportRequests",
+        {"filter[accessType]": access_type},
+    )
+    existing = data.get("data", [])
+    for rr in existing:
+        if not rr["attributes"].get("stoppedDueToInactivity", False):
+            return rr["id"]
+
+    # Create new
+    body = {
+        "data": {
+            "type": "analyticsReportRequests",
+            "attributes": {"accessType": access_type},
+            "relationships": {"app": {"data": {"type": "apps", "id": app_id}}},
+        }
+    }
+    result = _apple_api_post(
+        "https://api.appstoreconnect.apple.com/v1/analyticsReportRequests", body
+    )
+    return result["data"]["id"]
+
+
+def _apple_download_report_data(report_id):
+    """Download all segment data for a report. Returns list of dicts (rows)."""
+    # Get instances (daily granularity preferred)
+    data = _apple_api_get(
+        f"https://api.appstoreconnect.apple.com/v1/analyticsReports/{report_id}/instances",
+        {"limit": 1, "sort": "-processingDate"},
+    )
+    instances = data.get("data", [])
+    if not instances:
+        return []
+
+    inst = instances[0]
+    inst_id = inst["id"]
+    processing_date = inst["attributes"].get("processingDate", "")
+
+    # Get segments
+    seg_data = _apple_api_get(
+        f"https://api.appstoreconnect.apple.com/v1/analyticsReportInstances/{inst_id}/segments",
+        {"fields[analyticsReportSegments]": "url,checksum,sizeInBytes"},
+    )
+    segments = seg_data.get("data", [])
+
+    all_rows = []
+    for seg in segments:
+        url = seg["attributes"].get("url", "")
+        if not url:
+            continue
+        resp = requests.get(url)
+        if resp.status_code != 200:
+            continue
+        # Data is gzipped TSV
+        try:
+            content = gzip.decompress(resp.content).decode("utf-8")
+        except Exception:
+            content = resp.text
+        if content.strip():
+            df = pd.read_csv(io.StringIO(content), sep="\t")
+            all_rows.extend(df.to_dict("records"))
+
+    return all_rows
+
+
+# Reports we want to pull per app
+APPLE_ANALYTICS_REPORTS = {
+    "discovery": {
+        "report_prefix": "r14",  # App Store Discovery and Engagement Standard
+        "table": "d1_apple_impressions",
+    },
+    "sessions": {
+        "report_prefix": "r8",  # App Sessions Standard
+        "table": "d1_apple_sessions",
+    },
+    "downloads": {
+        "report_prefix": "r3",  # App Downloads Standard
+        "table": "d1_apple_downloads_detail",
+    },
+    "purchases": {
+        "report_prefix": "r12",  # App Store Purchases Standard
+        "table": "d1_apple_purchases_detail",
+    },
+    "installs": {
+        "report_prefix": "r6",  # App Store Installation and Deletion Standard
+        "table": "d1_apple_installs_deletions",
+    },
+}
+
+
+def refresh_d1_apple_analytics():
+    """Pull Apple Analytics Reports (impressions, sessions, downloads, etc.)
+    for all apps and write to BigQuery.
+
+    This uses the App Store Connect Analytics Reports API which requires:
+    1. An ONGOING report request per app (created automatically)
+    2. Reports take 24-48h to generate after first request
+    3. Data is returned as gzipped TSV segments
+    """
+    print("  Fetching all apps from App Store Connect...")
+    apps = _apple_get_all_apps()
+    print(f"  Found {len(apps)} apps")
+
+    # Collect data per report type
+    report_data = {key: [] for key in APPLE_ANALYTICS_REPORTS}
+    apps_with_data = 0
+    apps_pending = 0
+
+    for i, app in enumerate(apps):
+        app_id = app["id"]
+        app_name = app["name"]
+
+        try:
+            req_id = _apple_ensure_report_request(app_id, "ONGOING")
+        except Exception as e:
+            print(f"    ⚠️  {app_name}: failed to create report request: {e}")
+            continue
+
+        has_data = False
+        for key, cfg in APPLE_ANALYTICS_REPORTS.items():
+            report_id = f"{cfg['report_prefix']}-{req_id}"
+            try:
+                rows = _apple_download_report_data(report_id)
+                if rows:
+                    # Add app metadata to each row
+                    for row in rows:
+                        row["_app_name"] = app_name
+                        row["_app_id"] = app_id
+                        row["_bundle_id"] = app["bundleId"]
+                    report_data[key].extend(rows)
+                    has_data = True
+            except Exception:
+                pass  # Report not ready yet
+
+        if has_data:
+            apps_with_data += 1
+        else:
+            apps_pending += 1
+
+        # Rate limiting — Apple allows ~200 requests/minute
+        if (i + 1) % 10 == 0:
+            time.sleep(1)
+            print(f"    Processed {i + 1}/{len(apps)} apps...")
+
+    # Write each report type to BigQuery
+    for key, cfg in APPLE_ANALYTICS_REPORTS.items():
+        rows = report_data[key]
+        if rows:
+            df = pd.DataFrame(rows)
+            # Normalize column names
+            df.columns = [c.strip().replace(" ", "_").lower() for c in df.columns]
+            write_table(df, cfg["table"])
+        else:
+            print(f"  ⚠️  {cfg['table']} — no data yet (reports still generating)")
+
+    print(
+        f"  📊 Apple Analytics: {apps_with_data} apps with data, {apps_pending} pending"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# GOOGLE PLAY CONSOLE — Store Performance & Installs from GCS
+# ═══════════════════════════════════════════════════════════════
+
+
+def _play_read_csv(blob):
+    """Read a Google Play CSV from GCS (UTF-16 encoded)."""
+    raw = blob.download_as_bytes()
+    content = raw.decode("utf-16")
+    return pd.read_csv(io.StringIO(content))
+
+
+def _play_recent_months(n=12):
+    """Return list of YYYYMM strings for the last n months."""
+    months = []
+    d = date.today().replace(day=1)
+    for _ in range(n):
+        months.append(d.strftime("%Y%m"))
+        d = (d - timedelta(days=1)).replace(day=1)
+    return months
+
+
+def refresh_d1_play_store_performance():
+    """Pull Google Play store performance, installs, and ratings from GCS bucket.
+
+    Requires:
+    - PLAY_BUCKET_ID set (e.g. pubsite_prod_6117430703357331981)
+    - Service account added to Play Console with 'View app information' permission
+
+    Files are UTF-8 with BOM. We only pull country-level breakdowns for the
+    last 12 months to keep the download manageable (~30K total files in bucket).
+    """
+    if not PLAY_BUCKET_ID:
+        print("  ⚠️  PLAY_BUCKET_ID not set — skipping Google Play reports")
+        print(
+            "     Set it in env or refresh_dashboard.py (find in Play Console → Download reports)"
+        )
+        return
+
+    from google.cloud import storage
+
+    storage_client = storage.Client(credentials=credentials, project=SOURCE_PROJECT)
+    bucket = storage_client.bucket(PLAY_BUCKET_ID)
+    recent = _play_recent_months(12)
+
+    def _collect_csvs(prefix, dimension="country"):
+        """Download CSVs matching recent months and a specific dimension."""
+        dfs = []
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        matched = [
+            b
+            for b in blobs
+            if b.name.endswith(".csv")
+            and any(m in b.name for m in recent)
+            and (dimension in b.name or dimension == "all")
+        ]
+        print(f"    {len(matched)} files to download (of {len(blobs)} total)")
+        for i, blob in enumerate(matched):
+            try:
+                df = _play_read_csv(blob)
+                df["_source_file"] = blob.name
+                dfs.append(df)
+            except Exception as e:
+                if i < 3:
+                    print(f"    ⚠️  Error reading {blob.name}: {e}")
+            if (i + 1) % 100 == 0:
+                print(f"    Downloaded {i + 1}/{len(matched)}...")
+        return dfs
+
+    # ── Store Performance (visitors, acquisitions, conversion rate) ──
+    print("  Fetching Google Play store performance reports...")
+    store_dfs = _collect_csvs("stats/store_performance/", "country")
+    if store_dfs:
+        combined = pd.concat(store_dfs, ignore_index=True)
+        combined.columns = [
+            c.strip().replace(" ", "_").replace("/", "_").lower()
+            for c in combined.columns
+        ]
+        write_table(combined, "d1_play_store_performance")
+    else:
+        print("  ⚠️  No store performance data found")
+
+    # ── Installs (daily installs by country) ──
+    print("  Fetching Google Play install reports...")
+    install_dfs = _collect_csvs("stats/installs/", "country")
+    if install_dfs:
+        combined = pd.concat(install_dfs, ignore_index=True)
+        combined.columns = [
+            c.strip().replace(" ", "_").replace("/", "_").lower()
+            for c in combined.columns
+        ]
+        write_table(combined, "d1_play_installs")
+    else:
+        print("  ⚠️  No install data found")
+
+    # ── Ratings ──
+    print("  Fetching Google Play rating reports...")
+    rating_dfs = _collect_csvs("stats/ratings/", "country")
+    if rating_dfs:
+        combined = pd.concat(rating_dfs, ignore_index=True)
+        combined.columns = [
+            c.strip().replace(" ", "_").replace("/", "_").lower()
+            for c in combined.columns
+        ]
+        write_table(combined, "d1_play_ratings")
+    else:
+        print("  ⚠️  No rating data found")
+
+    print("  ✅ Google Play reports complete")
+
+
+# ═══════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════
 
@@ -2058,6 +2395,12 @@ def main():
     refresh_d1_appstore_sales()
     refresh_d1_unified_revenue()
     refresh_d1_ios_downloads()
+
+    print("\n📊 Apple Analytics (Impressions, Sessions, Page Views):")
+    refresh_d1_apple_analytics()
+
+    print("\n📊 Google Play Console (Store Performance, Installs, Ratings):")
+    refresh_d1_play_store_performance()
 
     print("\n📊 App Performance:")
     refresh_d1_app_engagement()

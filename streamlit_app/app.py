@@ -23,7 +23,7 @@ from kliq_ui_kit import (
 from auth import require_auth, show_admin_panel, logout_button
 
 st.set_page_config(
-    page_title="KLIQ Growth Dashboard",
+    page_title="KLIQ Command Centre",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -37,7 +37,7 @@ require_auth()
 logout_button()
 
 # ── Home Page ──
-st.title("KLIQ Growth Dashboard")
+st.title("KLIQ Command Centre")
 show_admin_panel()
 st.markdown("---")
 
@@ -55,7 +55,7 @@ _hero_card = """
 </div>
 """
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.markdown(
         _hero_card.format(
@@ -64,8 +64,8 @@ with col1:
             r=CARD_RADIUS,
             shadow=SHADOW_CARD,
             label="Navigate Using The Sidebar",
-            value="9 Pages",
-            desc="Full growth analytics suite",
+            value="10 Pages",
+            desc="Growth + Outreach",
         ),
         unsafe_allow_html=True,
     )
@@ -90,15 +90,31 @@ with col3:
             r=CARD_RADIUS,
             shadow=SHADOW_CARD,
             label="Integrations",
-            value="Meta + Calendar",
-            desc="Ads & demo call tracking",
+            value="Meta + Apple + Play",
+            desc="Ads, analytics & store data",
+        ),
+        unsafe_allow_html=True,
+    )
+with col4:
+    st.markdown(
+        _hero_card.format(
+            bg=TANGERINE,
+            fg=DARK,
+            r=CARD_RADIUS,
+            shadow=SHADOW_CARD,
+            label="Prospect Outreach",
+            value="Email + SMS",
+            desc="Automated sequences",
         ),
         unsafe_allow_html=True,
     )
 
 st.markdown("")
+
+# ── Growth Dashboard Section ──
 st.markdown(
-    section_header("Pages", "Dashboard navigation guide"), unsafe_allow_html=True
+    section_header("📊 Growth Dashboard", "Analytics & performance tracking"),
+    unsafe_allow_html=True,
 )
 st.markdown(
     """
@@ -113,5 +129,20 @@ st.markdown(
 | **7 — Leads & Sales** | Meta Ads leads, demo calls, acquisition funnel, revenue, cancellations, weekly data table |
 | **8 — Growth Strategy** | Clusters, retention, LTV, paid ad ROI simulator, growth ladder, revenue projections |
 | **9 — Feature Adoption** | Per-app feature usage, platform-wide adoption, category breakdown, monthly trends, app vs platform comparison |
+"""
+)
+
+st.markdown("")
+
+# ── Outreach Section ──
+st.markdown(
+    section_header("📧 Prospect Outreach", "Email sequences & prospect management"),
+    unsafe_allow_html=True,
+)
+st.markdown(
+    """
+| Section | Description |
+|---------|-------------|
+| **10 — Outreach** | Email draft queue, prospect management, sent message history, phone import, cheat sheet generator, BigQuery sync |
 """
 )

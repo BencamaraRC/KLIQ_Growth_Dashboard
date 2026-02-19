@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Hey {{ first_name }},</p>
+
+<p>It's Ben from KLIQ — just wanted to personally welcome you.</p>
+
+<p>Your coaching app is set up and ready to go. There are <strong>5 quick steps</strong> between you and earning your
+    first dollar on KLIQ:</p>
+
+<ol>
+    {% for step in remaining %}
+    <li>{{ step }}</li>
+    {% endfor %}
+</ol>
+
+<p>That's it — <strong>{{ remaining_count }} step{{ 's' if remaining_count != 1 else '' }}</strong> and you're live and
+    ready to earn.</p>
+
+<p>You can finish setting up your store right now — just head to <a
+        href="https://admin.joinkliq.io/">admin.joinkliq.io</a> and pick up where you left off.</p>
+
+<p>Most coaches who complete these within the first 48 hours see their first subscriber within the week.</p>
+
+<p>If you'd rather we just did it for you — we have a white-glove service where my team sets everything up, creates your
+    first program, and gets you launch-ready. Happy to jump on a quick call if that sounds easier: <a
+        href="https://calendly.com/joinkliq/kliq-pp-shortlist">book here</a>.</p>
+
+<p>Either way, I'm here if you need anything. Just hit reply.</p>
+
+<p>Ben</p>
+{% endblock %}

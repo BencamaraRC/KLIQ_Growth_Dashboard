@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy app code
 COPY streamlit_app/ ./streamlit_app/
 COPY .streamlit/ ./.streamlit/
+COPY prospect-outreach/ ./prospect-outreach/
 
 # Copy service account key for BigQuery access
 COPY rcwl-development-0c013e9b5c2b.json ./rcwl-development-0c013e9b5c2b.json

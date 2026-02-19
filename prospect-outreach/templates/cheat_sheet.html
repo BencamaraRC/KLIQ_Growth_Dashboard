@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Hey {{ first_name }},</p>
+
+<p>Nice one — I can see you've {{ latest_done|lower }}. You're making great progress.</p>
+
+<p>I noticed you're in the <strong>{{ coach_type }}</strong> niche, so I put together a quick cheat sheet specifically
+    for {{ coach_type }} coaches — <strong>"Your First 100 Paying Subscribers"</strong>. It's attached as a PDF.</p>
+
+<p>Here's where you're at right now:</p>
+
+<p>
+    {% for step in completed %}
+    ✅ {{ step }}<br>
+    {% endfor %}
+    {% for step in remaining %}
+    ⬜ {{ step }}<br>
+    {% endfor %}
+</p>
+
+<p><strong>{{ progress_text }}</strong></p>
+
+{% if next_step %}
+<p>Your next step: <strong>{{ next_step }}</strong>. Once that's done you're even closer to earning your first dollar.
+</p>
+{% endif %}
+
+<p>You can finish setting up your store anytime at <a href="https://admin.joinkliq.io/">admin.joinkliq.io</a> — it only
+    takes a few minutes.</p>
+
+<p>If you'd rather we just handled it — we have a white-glove service where my team does the full setup for you. Takes
+    48 hours and you're launch-ready. Happy to jump on a call: <a
+        href="https://calendly.com/joinkliq/kliq-pp-shortlist">book here</a>.</p>
+
+<p>Just hit reply if you need anything.</p>
+
+<p>Ben</p>
+{% endblock %}
