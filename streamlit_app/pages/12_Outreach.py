@@ -291,22 +291,25 @@ elif tab == "📱 SMS Queue":
     with hcol1:
         st.subheader("📱 SMS Queue")
         st.caption(
-            "Send SMS via **KLIQ** Alpha Sender ID. Rules: signed up **24h+ ago** (max 14 days), **not logged back in**."
+            "Send SMS via **KLIQ** Alpha Sender ID. Rules: signed up **24h+ ago** (max 14 days), **not logged back in**. "
+            "Phone numbers pulled live from BigQuery `prod_dataset.applications`."
         )
     with hcol2:
         if st.button("🔄 Refresh", key="refresh_sms", use_container_width=True):
             st.rerun()
 
-    prospects = get_all_prospects()
+    # Pull phone numbers directly from BigQuery (prod_dataset.applications)
+    with st.spinner("Loading phone numbers from BigQuery..."):
+        bq_phones = fetch_all_phones()
 
-    # Filter to those with phone numbers, signed up 24h+ ago but within 14 days
+    # Filter to those signed up 24h+ ago but within 14 days
     now = datetime.now(timezone.utc)
     cutoff_14d = now - pd.Timedelta(days=14)
     cutoff_24h = now - pd.Timedelta(hours=24)
 
     def _sms_eligible(p):
-        """Eligible if: has phone, signed up 24h-14d ago."""
-        sd = p.get("signup_date") or p.get("created_at")
+        """Eligible if signed up 24h-14d ago."""
+        sd = p.get("created_at")
         if not sd or sd in ("None", ""):
             return False
         try:
@@ -315,7 +318,7 @@ elif tab == "📱 SMS Queue":
         except Exception:
             return False
 
-    time_eligible = [p for p in prospects if p.get("phone") and _sms_eligible(p)]
+    time_eligible = [p for p in bq_phones if _sms_eligible(p)]
 
     # Check BigQuery: only include prospects who have NOT logged back in
     with_phone = []
@@ -325,28 +328,27 @@ elif tab == "📱 SMS Queue":
         ):
             for p in time_eligible:
                 if not has_returned_after_signup(p["application_id"]):
+                    # Normalise field names for downstream compatibility
+                    p["phone"] = p.get("phone_number", "")
+                    p["name"] = p.get("application_name", "Coach")
+                    p["signup_date"] = str(p.get("created_at", ""))
                     with_phone.append(p)
 
     total_sms_sent = len([h for h in get_sent_history() if h.get("channel") == "sms"])
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Prospects", len(prospects))
-    c2.metric("With Phone", len(with_phone))
-    c3.metric("SMS Sent", total_sms_sent)
-    c4.metric(
-        "Pending",
-        sum(
-            1
-            for p in with_phone
-            if not already_sent(p["application_id"], "welcome", "sms")
-        ),
-    )
+    c1.metric("Total w/ Phone (BQ)", len(bq_phones))
+    c2.metric("Eligible (24h-14d)", len(time_eligible))
+    c3.metric("SMS Ready", len(with_phone))
+    c4.metric("SMS Sent", total_sms_sent)
 
     st.divider()
 
     if not with_phone:
         st.info(
-            "No prospects with phone numbers. Use **Sync from BigQuery** to pull phone numbers, or **Import Phones** to upload a CSV."
+            f"No eligible prospects right now. **{len(bq_phones)}** have phone numbers in BigQuery, "
+            f"**{len(time_eligible)}** signed up 24h-14d ago, but none passed the 'not logged back in' check "
+            "(or the time window is empty)."
         )
         st.stop()
 
@@ -719,7 +721,7 @@ elif tab == "🔄 Sync from BigQuery":
     with sync_col2:
         st.markdown("### 📱 Sync Phone Numbers")
         st.caption(
-            "Pull phone numbers from BigQuery self-serve signup tables and match to existing prospects."
+            "Pull phone numbers from BigQuery `prod_dataset.applications` and attach to existing prospects."
         )
 
         if st.button("📱 Sync Phones from BigQuery", type="primary"):

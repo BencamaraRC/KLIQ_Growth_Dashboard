@@ -88,23 +88,14 @@ def has_returned_after_signup(application_id):
 
 
 def _lookup_phone(client, email):
-    """Look up a phone number from the self-serve signup tables by email."""
+    """Look up a phone number from prod_dataset.applications by email."""
     sql = f"""
-    WITH all_signups AS (
-        SELECT phone_number, email, created_at
-        FROM `rcwl-development.dev_dataset.temp_self_serve_2`
-        UNION ALL
-        SELECT phone_number, email, created_at
-        FROM `rcwl-development.dev_dataset.temp_self_serve_march`
-    )
     SELECT phone_number
-    FROM all_signups
+    FROM `{DATA_PROJECT}.prod_dataset.applications`
     WHERE LOWER(email) = LOWER('{email}')
       AND phone_number IS NOT NULL
       AND phone_number != 'NULL'
       AND phone_number != ''
-      AND STARTS_WITH(phone_number, '+')
-    ORDER BY created_at DESC
     LIMIT 1
     """
     try:
@@ -118,40 +109,22 @@ def _lookup_phone(client, email):
 
 def fetch_all_phones():
     """
-    Fetch all prospects with valid phone numbers from BigQuery self-serve tables,
-    joined with the applications table to get application_id.
-    Returns list of dicts with: application_id, first_name, phone_number, email, application_name, created_at.
+    Fetch all prospects with valid phone numbers from prod_dataset.applications.
+    Returns list of dicts with: application_id, application_name, phone_number, email, created_at.
     """
     client = get_client()
     sql = f"""
-    WITH all_signups AS (
-        SELECT first_name, last_name, phone_number, email, application_name, created_at
-        FROM `rcwl-development.dev_dataset.temp_self_serve_2`
-        UNION ALL
-        SELECT first_name, last_name, phone_number, email, application_name, created_at
-        FROM `rcwl-development.dev_dataset.temp_self_serve_march`
-    ),
-    deduped AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY email ORDER BY created_at DESC) as rn
-        FROM all_signups
-        WHERE phone_number IS NOT NULL
-          AND phone_number != 'NULL'
-          AND phone_number != ''
-          AND STARTS_WITH(phone_number, '+')
-    )
     SELECT
-        a.id as application_id,
-        d.first_name,
-        d.last_name,
-        d.phone_number,
-        d.email,
-        COALESCE(a.application_name, d.application_name) as application_name,
-        d.created_at
-    FROM deduped d
-    LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a
-        ON LOWER(d.email) = LOWER(a.email)
-    WHERE d.rn = 1
-    ORDER BY d.created_at DESC
+        a.id AS application_id,
+        a.application_name,
+        a.phone_number,
+        a.email,
+        a.created_at
+    FROM `{DATA_PROJECT}.prod_dataset.applications` a
+    WHERE a.phone_number IS NOT NULL
+      AND a.phone_number != 'NULL'
+      AND a.phone_number != ''
+    ORDER BY a.created_at DESC
     """
     df = client.query(sql).to_dataframe()
     return df.to_dict("records") if not df.empty else []
