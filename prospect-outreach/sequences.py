@@ -50,10 +50,11 @@ SMS_TEMPLATES = {
     ),
     # ── Facebook Campaign SMS ──
     "fb_reengagement": Template(
-        "Hey {{ first_name }}, it's KLIQ! You showed interest in our Partner Program - "
-        "we've just launched KLIQ Concierge: a dedicated VA for your coaching biz, "
-        "15hrs/week for just $500/mo. Cancel anytime. "
-        "Find out more: https://calendly.com/joinkliq/kliq-demo-call-15mins-clone "
+        "Hey {{ first_name }}, it's KLIQ! Building a coaching business is hard - "
+        "juggling tools, admin, content. We just launched KLIQ Concierge: "
+        "your own dedicated VA (15hrs/wk) + all-in-one platform to sell courses, "
+        "subs & bookings. Just $500/mo, cancel anytime. "
+        "Book a quick call: https://calendly.com/joinkliq/kliq-demo-call-15mins-clone "
         "- KLIQ Team"
     ),
     "fb_new_lead": Template(
@@ -88,7 +89,7 @@ EMAIL_CONFIG = {
     },
     # ── Facebook Campaign Emails ──
     "fb_reengagement": {
-        "subject": "{{ first_name }}, something new from KLIQ you'll want to see",
+        "subject": "{{ first_name }}, your own dedicated growth partner — KLIQ Concierge",
         "template_file": "fb_reengagement.html",
         "cta_url": "https://calendly.com/joinkliq/kliq-demo-call-15mins-clone",
         "cta_text": "Book a Call — KLIQ Concierge",
