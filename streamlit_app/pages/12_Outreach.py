@@ -29,6 +29,10 @@ from tracker import (
     already_sent,
     record_sent,
     _get_db,
+    upsert_fb_lead,
+    get_fb_leads,
+    fb_already_sent,
+    record_fb_sent,
 )
 from data_pipeline import (
     fetch_new_signups,
@@ -105,10 +109,34 @@ def _pick_email_template(prospect):
     return None
 
 
+# ── Click Rate Tracking ──
+_all_sent = get_sent_history()
+_email_sent = [h for h in _all_sent if h.get("channel") == "email"]
+_sms_sent = [h for h in _all_sent if h.get("channel") == "sms"]
+_fb_email_sent = [
+    h for h in _email_sent if h.get("sequence_step", "").startswith("fb_")
+]
+_fb_sms_sent = [h for h in _sms_sent if h.get("sequence_step", "").startswith("fb_")]
+
+with st.expander("📊 Outreach Stats", expanded=True):
+    mc1, mc2, mc3, mc4, mc5, mc6 = st.columns(6)
+    mc1.metric("Emails Sent", len(_email_sent))
+    mc2.metric("SMS Sent", len(_sms_sent))
+    mc3.metric("FB Emails", len(_fb_email_sent))
+    mc4.metric("FB SMS", len(_fb_sms_sent))
+    mc5.metric("Total Messages", len(_all_sent))
+    mc6.metric("Unique Recipients", len(set(h.get("recipient", "") for h in _all_sent)))
+
+    st.caption(
+        "Click rates require Brevo webhook integration or Twilio link tracking. "
+        "Brevo tracks opens/clicks automatically — check your [Brevo dashboard](https://app.brevo.com) for detailed analytics."
+    )
+
 # ── Sub-page navigation ──
 tab = st.radio(
     "Section",
     [
+        "📣 FB Campaigns",
         "📧 Email Draft Queue",
         "📱 SMS Queue",
         "👥 Prospects",
@@ -122,9 +150,317 @@ tab = st.radio(
 
 
 # ═══════════════════════════════════════════════════════════════════
+# �  FB CAMPAIGNS
+# ═══════════════════════════════════════════════════════════════════
+if tab == "📣 FB Campaigns":
+    hcol1, hcol2 = st.columns([6, 1])
+    with hcol1:
+        st.subheader("📣 Facebook Lead Campaigns")
+        st.caption(
+            "Two automated flows: **Re-Engagement** (old leads → KLIQ Concierge) "
+            "and **New Leads** (fresh leads → Partner Program shortlist, 12h delay)."
+        )
+    with hcol2:
+        if st.button("🔄 Refresh", key="refresh_fb", use_container_width=True):
+            st.rerun()
+
+    # ── Import FB Leads ──
+    with st.expander("📥 Import Facebook Leads (CSV)", expanded=False):
+        st.caption(
+            "Upload a CSV with columns: **first_name**, **last_name**, **email**, **phone** (optional). "
+            "Select which campaign to assign them to."
+        )
+        fb_campaign_choice = st.selectbox(
+            "Assign to campaign",
+            ["fb_reengagement", "fb_new_lead"],
+            format_func=lambda x: "Re-Engagement (old leads)" if x == "fb_reengagement" else "New Leads (fresh leads)",
+            key="fb_import_campaign",
+        )
+        fb_csv = st.file_uploader("Upload CSV", type=["csv"], key="fb_csv_upload")
+        if fb_csv and st.button("Import Leads", type="primary", key="fb_import_btn"):
+            reader = csv.DictReader(io.StringIO(fb_csv.getvalue().decode("utf-8")))
+            imported = 0
+            for row in reader:
+                email = (row.get("email") or row.get("Email") or "").strip()
+                if not email:
+                    continue
+                fn = (row.get("first_name") or row.get("First Name") or row.get("first name") or "").strip()
+                ln = (row.get("last_name") or row.get("Last Name") or row.get("last name") or "").strip()
+                phone = (row.get("phone") or row.get("Phone") or row.get("phone_number") or "").strip()
+                lead_date = (row.get("lead_date") or row.get("created_time") or row.get("date") or "").strip()
+                if not lead_date:
+                    lead_date = datetime.now(timezone.utc).isoformat()
+                upsert_fb_lead(fn, ln, email, phone, fb_campaign_choice, lead_date)
+                imported += 1
+            st.success(f"Imported **{imported}** leads into **{fb_campaign_choice}** campaign!")
+            st.rerun()
+
+    # ── Campaign Tabs ──
+    fb_tab = st.radio(
+        "Campaign",
+        ["🔁 Re-Engagement", "🆕 New Leads"],
+        horizontal=True,
+        key="fb_campaign_tab",
+    )
+
+    # ────────────────────────────────────────────────────────────────
+    # 🔁 RE-ENGAGEMENT CAMPAIGN
+    # ────────────────────────────────────────────────────────────────
+    if fb_tab == "🔁 Re-Engagement":
+        st.markdown("### 🔁 Re-Engagement Campaign")
+        st.caption(
+            "Old FB leads who never acted. Introduce **KLIQ Concierge**: dedicated VA, "
+            "15hrs/week, $500/mo, cancel anytime. "
+            "Link: [calendly.com/joinkliq/kliq-demo-call-15mins-clone](https://calendly.com/joinkliq/kliq-demo-call-15mins-clone)"
+        )
+
+        re_leads = get_fb_leads(campaign="fb_reengagement")
+        if not re_leads:
+            st.info("No re-engagement leads imported yet. Use the CSV importer above.")
+            st.stop()
+
+        re_email_pending = [l for l in re_leads if not fb_already_sent(l["email"], "fb_reengagement", "email")]
+        re_sms_pending = [l for l in re_leads if l.get("phone") and not fb_already_sent(l["email"], "fb_reengagement", "sms")]
+        re_email_done = len(re_leads) - len(re_email_pending)
+        re_sms_done = len([l for l in re_leads if l.get("phone")]) - len(re_sms_pending)
+
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        rc1.metric("Total Leads", len(re_leads))
+        rc2.metric("Email Pending", len(re_email_pending))
+        rc3.metric("SMS Pending", len(re_sms_pending))
+        rc4.metric("Sent (Email/SMS)", f"{re_email_done}/{re_sms_done}")
+
+        st.divider()
+
+        # Bulk send
+        bcol1, bcol2 = st.columns(2)
+        with bcol1:
+            if re_email_pending and st.button(
+                f"�📧 Send All Emails ({len(re_email_pending)})", type="primary", key="fb_re_bulk_email"
+            ):
+                progress_bar = st.progress(0)
+                sent = 0
+                for i, lead in enumerate(re_email_pending):
+                    ctx = {"first_name": lead["first_name"] or "Coach", "name": lead["first_name"] or "Coach"}
+                    subject, body = render_email("fb_reengagement", ctx)
+                    msg_id = send_email(lead["email"], subject, body)
+                    if msg_id:
+                        record_fb_sent(lead["email"], "fb_reengagement", "email", lead["email"], msg_id)
+                        sent += 1
+                    progress_bar.progress((i + 1) / len(re_email_pending))
+                st.success(f"Sent {sent} re-engagement emails!")
+                st.rerun()
+
+        with bcol2:
+            if re_sms_pending and st.button(
+                f"📱 Send All SMS ({len(re_sms_pending)})", type="primary", key="fb_re_bulk_sms"
+            ):
+                progress_bar = st.progress(0)
+                sent = 0
+                for i, lead in enumerate(re_sms_pending):
+                    ctx = {"first_name": lead["first_name"] or "Coach", "name": lead["first_name"] or "Coach"}
+                    body = render_sms("fb_reengagement", ctx)
+                    msg_id = send_sms(lead["phone"], body)
+                    if msg_id:
+                        record_fb_sent(lead["email"], "fb_reengagement", "sms", lead["phone"], msg_id)
+                        sent += 1
+                    progress_bar.progress((i + 1) / len(re_sms_pending))
+                st.success(f"Sent {sent} re-engagement SMS!")
+                st.rerun()
+
+        # Lead list
+        st.markdown("#### Leads")
+        for lead in re_leads:
+            email_sent = fb_already_sent(lead["email"], "fb_reengagement", "email")
+            sms_sent = fb_already_sent(lead["email"], "fb_reengagement", "sms") if lead.get("phone") else None
+            status_parts = []
+            if email_sent:
+                status_parts.append("✅ Email")
+            else:
+                status_parts.append("⏳ Email")
+            if lead.get("phone"):
+                status_parts.append("✅ SMS" if sms_sent else "⏳ SMS")
+            status_str = " · ".join(status_parts)
+
+            with st.container():
+                col1, col2, col3 = st.columns([3, 2, 1])
+                with col1:
+                    st.markdown(
+                        f"**{lead.get('first_name', '')} {lead.get('last_name', '')}** — "
+                        f"{lead['email']}"
+                    )
+                with col2:
+                    st.caption(f"📱 {lead.get('phone') or 'No phone'} · {status_str}")
+                with col3:
+                    if not email_sent:
+                        if st.button("📧", key=f"re_email_{lead['id']}", help="Send email"):
+                            ctx = {"first_name": lead["first_name"] or "Coach", "name": lead["first_name"] or "Coach"}
+                            subject, body = render_email("fb_reengagement", ctx)
+                            msg_id = send_email(lead["email"], subject, body)
+                            if msg_id:
+                                record_fb_sent(lead["email"], "fb_reengagement", "email", lead["email"], msg_id)
+                                st.rerun()
+                    if lead.get("phone") and not sms_sent:
+                        if st.button("📱", key=f"re_sms_{lead['id']}", help="Send SMS"):
+                            ctx = {"first_name": lead["first_name"] or "Coach", "name": lead["first_name"] or "Coach"}
+                            body = render_sms("fb_reengagement", ctx)
+                            msg_id = send_sms(lead["phone"], body)
+                            if msg_id:
+                                record_fb_sent(lead["email"], "fb_reengagement", "sms", lead["phone"], msg_id)
+                                st.rerun()
+
+    # ────────────────────────────────────────────────────────────────
+    # 🆕 NEW LEADS CAMPAIGN
+    # ────────────────────────────────────────────────────────────────
+    else:
+        st.markdown("### 🆕 New Leads Campaign")
+        st.caption(
+            "Fresh FB leads → Partner Program shortlist email + SMS. "
+            "**Rule**: Send **12 hours** after lead comes in. "
+            "Link: [calendly.com/joinkliq/kliq-pp-shortlist](https://calendly.com/joinkliq/kliq-pp-shortlist)"
+        )
+
+        new_leads = get_fb_leads(campaign="fb_new_lead")
+        if not new_leads:
+            st.info("No new leads imported yet. Use the CSV importer above.")
+            st.stop()
+
+        # Filter: only leads 12+ hours old
+        now = datetime.now(timezone.utc)
+        cutoff_12h = now - pd.Timedelta(hours=12)
+
+        def _fb_new_eligible(lead):
+            ld = lead.get("lead_date")
+            if not ld or ld in ("None", ""):
+                return True  # If no date, assume eligible
+            try:
+                dt = pd.to_datetime(ld, utc=True)
+                return dt <= cutoff_12h
+            except Exception:
+                return True
+
+        eligible = [l for l in new_leads if _fb_new_eligible(l)]
+        waiting = [l for l in new_leads if not _fb_new_eligible(l)]
+
+        nl_email_pending = [l for l in eligible if not fb_already_sent(l["email"], "fb_new_lead", "email")]
+        nl_sms_pending = [l for l in eligible if l.get("phone") and not fb_already_sent(l["email"], "fb_new_lead", "sms")]
+        nl_email_done = len(eligible) - len(nl_email_pending)
+        nl_sms_done = len([l for l in eligible if l.get("phone")]) - len(nl_sms_pending)
+
+        nc1, nc2, nc3, nc4, nc5 = st.columns(5)
+        nc1.metric("Total Leads", len(new_leads))
+        nc2.metric("Waiting (<12h)", len(waiting))
+        nc3.metric("Email Pending", len(nl_email_pending))
+        nc4.metric("SMS Pending", len(nl_sms_pending))
+        nc5.metric("Sent (Email/SMS)", f"{nl_email_done}/{nl_sms_done}")
+
+        if waiting:
+            st.info(f"**{len(waiting)}** leads are still within the 12-hour waiting period.")
+
+        st.divider()
+
+        # Bulk send
+        bcol1, bcol2 = st.columns(2)
+        with bcol1:
+            if nl_email_pending and st.button(
+                f"📧 Send All Emails ({len(nl_email_pending)})", type="primary", key="fb_nl_bulk_email"
+            ):
+                progress_bar = st.progress(0)
+                sent = 0
+                for i, lead in enumerate(nl_email_pending):
+                    ctx = {"first_name": lead["first_name"] or "Coach", "name": lead["first_name"] or "Coach"}
+                    subject, body = render_email("fb_new_lead", ctx)
+                    msg_id = send_email(lead["email"], subject, body)
+                    if msg_id:
+                        record_fb_sent(lead["email"], "fb_new_lead", "email", lead["email"], msg_id)
+                        sent += 1
+                    progress_bar.progress((i + 1) / len(nl_email_pending))
+                st.success(f"Sent {sent} new lead emails!")
+                st.rerun()
+
+        with bcol2:
+            if nl_sms_pending and st.button(
+                f"📱 Send All SMS ({len(nl_sms_pending)})", type="primary", key="fb_nl_bulk_sms"
+            ):
+                progress_bar = st.progress(0)
+                sent = 0
+                for i, lead in enumerate(nl_sms_pending):
+                    ctx = {"first_name": lead["first_name"] or "Coach", "name": lead["first_name"] or "Coach"}
+                    body = render_sms("fb_new_lead", ctx)
+                    msg_id = send_sms(lead["phone"], body)
+                    if msg_id:
+                        record_fb_sent(lead["email"], "fb_new_lead", "sms", lead["phone"], msg_id)
+                        sent += 1
+                    progress_bar.progress((i + 1) / len(nl_sms_pending))
+                st.success(f"Sent {sent} new lead SMS!")
+                st.rerun()
+
+        # Lead list
+        st.markdown("#### Eligible Leads (12h+ old)")
+        for lead in eligible:
+            email_sent = fb_already_sent(lead["email"], "fb_new_lead", "email")
+            sms_sent = fb_already_sent(lead["email"], "fb_new_lead", "sms") if lead.get("phone") else None
+            status_parts = []
+            if email_sent:
+                status_parts.append("✅ Email")
+            else:
+                status_parts.append("⏳ Email")
+            if lead.get("phone"):
+                status_parts.append("✅ SMS" if sms_sent else "⏳ SMS")
+            status_str = " · ".join(status_parts)
+
+            with st.container():
+                col1, col2, col3 = st.columns([3, 2, 1])
+                with col1:
+                    st.markdown(
+                        f"**{lead.get('first_name', '')} {lead.get('last_name', '')}** — "
+                        f"{lead['email']}"
+                    )
+                with col2:
+                    ld = lead.get("lead_date", "")
+                    try:
+                        ld = pd.to_datetime(ld).strftime("%d %b %Y %H:%M")
+                    except Exception:
+                        pass
+                    st.caption(f"📱 {lead.get('phone') or 'No phone'} · Lead: {ld} · {status_str}")
+                with col3:
+                    if not email_sent:
+                        if st.button("📧", key=f"nl_email_{lead['id']}", help="Send email"):
+                            ctx = {"first_name": lead["first_name"] or "Coach", "name": lead["first_name"] or "Coach"}
+                            subject, body = render_email("fb_new_lead", ctx)
+                            msg_id = send_email(lead["email"], subject, body)
+                            if msg_id:
+                                record_fb_sent(lead["email"], "fb_new_lead", "email", lead["email"], msg_id)
+                                st.rerun()
+                    if lead.get("phone") and not sms_sent:
+                        if st.button("📱", key=f"nl_sms_{lead['id']}", help="Send SMS"):
+                            ctx = {"first_name": lead["first_name"] or "Coach", "name": lead["first_name"] or "Coach"}
+                            body = render_sms("fb_new_lead", ctx)
+                            msg_id = send_sms(lead["phone"], body)
+                            if msg_id:
+                                record_fb_sent(lead["email"], "fb_new_lead", "sms", lead["phone"], msg_id)
+                                st.rerun()
+
+        if waiting:
+            st.markdown("#### ⏳ Waiting Leads (< 12 hours)")
+            for lead in waiting:
+                ld = lead.get("lead_date", "")
+                try:
+                    dt = pd.to_datetime(ld, utc=True)
+                    mins_left = int((dt + pd.Timedelta(hours=12) - now).total_seconds() / 60)
+                    time_str = f"{mins_left // 60}h {mins_left % 60}m remaining"
+                except Exception:
+                    time_str = "unknown"
+                st.caption(
+                    f"**{lead.get('first_name', '')} {lead.get('last_name', '')}** — "
+                    f"{lead['email']} — ⏱️ {time_str}"
+                )
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 📧  EMAIL DRAFT QUEUE
 # ═══════════════════════════════════════════════════════════════════
-if tab == "📧 Email Draft Queue":
+elif tab == "📧 Email Draft Queue":
     hcol1, hcol2 = st.columns([6, 1])
     with hcol1:
         st.subheader("📧 Email Draft Queue")

@@ -48,6 +48,20 @@ SMS_TEMPLATES = {
         "Interested? Book a call: calendly.com/joinkliq/kliq-pp-shortlist "
         "- KLIQ Success Team"
     ),
+    # ── Facebook Campaign SMS ──
+    "fb_reengagement": Template(
+        "Hey {{ first_name }}, it's KLIQ! You showed interest in our Partner Program - "
+        "we've just launched KLIQ Concierge: a dedicated VA for your coaching biz, "
+        "15hrs/week for just $500/mo. Cancel anytime. "
+        "Find out more: https://calendly.com/joinkliq/kliq-demo-call-15mins-clone "
+        "- KLIQ Team"
+    ),
+    "fb_new_lead": Template(
+        "Hi {{ first_name }}, thanks for applying to the KLIQ Partner Program! "
+        "Your profile stood out - we'd love to chat about how the sponsorship works. "
+        "Book a quick call: https://calendly.com/joinkliq/kliq-pp-shortlist "
+        "- KLIQ Team"
+    ),
 }
 
 
@@ -71,6 +85,19 @@ EMAIL_CONFIG = {
         "template_file": "no_activity.html",
         "cta_url": "https://calendly.com/joinkliq/kliq-pp-shortlist",
         "cta_text": "Book a Free Setup Call",
+    },
+    # ── Facebook Campaign Emails ──
+    "fb_reengagement": {
+        "subject": "{{ first_name }}, something new from KLIQ you'll want to see",
+        "template_file": "fb_reengagement.html",
+        "cta_url": "https://calendly.com/joinkliq/kliq-demo-call-15mins-clone",
+        "cta_text": "Book a Call — KLIQ Concierge",
+    },
+    "fb_new_lead": {
+        "subject": "{{ first_name }}, you've been shortlisted for the KLIQ Partner Program",
+        "template_file": "fb_new_lead.html",
+        "cta_url": "https://calendly.com/joinkliq/kliq-pp-shortlist",
+        "cta_text": "Book Your Call",
     },
 }
 
