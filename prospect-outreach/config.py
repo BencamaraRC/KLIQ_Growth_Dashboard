@@ -5,7 +5,8 @@ Configuration and constants for the prospect outreach system.
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+_ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+load_dotenv(_ENV_FILE)
 
 # ── BigQuery ──
 GCP_PROJECT = "rcwl-development"  # project where jobs run (SA has bigquery.jobs.create)

@@ -1,25 +1,17 @@
 """
-Email sending via Brevo (formerly Sendinblue).
+Email sending via Brevo (formerly Sendinblue) REST API.
 """
 
 import base64
-import sib_api_v3_sdk
-from sib_api_v3_sdk.rest import ApiException
+import requests
 from config import BREVO_API_KEY, BREVO_FROM_EMAIL, BREVO_FROM_NAME, DRY_RUN
 
-
-def _get_api():
-    """Get a configured Brevo transactional email API instance."""
-    configuration = sib_api_v3_sdk.Configuration()
-    configuration.api_key["api-key"] = BREVO_API_KEY
-    return sib_api_v3_sdk.TransactionalEmailsApi(
-        sib_api_v3_sdk.ApiClient(configuration)
-    )
+BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
 
 
 def send_email(to_email, subject, html_body, attachment_path=None):
     """
-    Send an email via Brevo, optionally with a PDF attachment.
+    Send an email via Brevo REST API, optionally with a PDF attachment.
     Returns the Brevo message ID on success, or 'dry_run' in dry-run mode.
     """
     if DRY_RUN:
@@ -28,31 +20,43 @@ def send_email(to_email, subject, html_body, attachment_path=None):
         print(f"  Attachment: {attachment_path or 'None'}")
         return "dry_run"
 
-    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
-        to=[{"email": to_email}],
-        sender={"email": BREVO_FROM_EMAIL, "name": BREVO_FROM_NAME},
-        subject=subject,
-        html_content=html_body,
-    )
+    if not BREVO_API_KEY:
+        print("[EMAIL ERROR] BREVO_API_KEY is not set.")
+        return None
+
+    payload = {
+        "sender": {"email": BREVO_FROM_EMAIL, "name": BREVO_FROM_NAME},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "htmlContent": html_body,
+    }
 
     # Attach PDF if provided
     if attachment_path:
         with open(attachment_path, "rb") as f:
             encoded = base64.b64encode(f.read()).decode("utf-8")
-        send_smtp_email.attachment = [
+        payload["attachment"] = [
             {
                 "content": encoded,
                 "name": "KLIQ_Growth_Cheatsheet.pdf",
-                "type": "application/pdf",
             }
         ]
 
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "api-key": BREVO_API_KEY,
+    }
+
     try:
-        api = _get_api()
-        response = api.send_transac_email(send_smtp_email)
-        msg_id = response.message_id
+        resp = requests.post(BREVO_API_URL, json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+        msg_id = resp.json().get("messageId", "unknown")
         print(f"[EMAIL SENT] ID={msg_id} to={to_email}")
         return msg_id
-    except ApiException as e:
+    except requests.exceptions.HTTPError as e:
+        print(f"[EMAIL ERROR] to={to_email}: {e} — {resp.text}")
+        return None
+    except Exception as e:
         print(f"[EMAIL ERROR] to={to_email}: {e}")
         return None
