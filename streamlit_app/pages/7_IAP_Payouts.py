@@ -12,7 +12,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from auth import require_auth, logout_button
+from receipt_generator import generate_receipt_pdf
 from kliq_ui_kit import (
     inject_css,
     register_plotly_template,
@@ -482,6 +484,50 @@ if not month_data.empty:
     html += "</tbody></table></div>"
 
     st.markdown(html, unsafe_allow_html=True)
+
+    # ── Generate Receipt Buttons ──
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("##### 🧾 Generate Payout Receipts")
+    st.caption("Download a branded PDF receipt for any app's payout this month.")
+
+    rcpt_cols = st.columns(4)
+    for idx, (_, row) in enumerate(pivoted.iterrows()):
+        app = row["App"]
+        kliq_pct = row.get("KLIQ %", 0)
+        a_sales = row.get("Apple Sales", 0)
+        a_fee = row.get("Apple Fee (30%)", 0)
+        a_kliq = row.get("Apple KLIQ Fee", 0)
+        a_pay = row.get("Apple Payout", 0)
+        g_sales = row.get("Google Sales", 0)
+        g_fee = row.get("Google Fee (30%)", 0)
+        g_kliq = row.get("Google KLIQ Fee", 0)
+        g_pay = row.get("Google Payout", 0)
+
+        pdf_bytes = generate_receipt_pdf(
+            app_name=app,
+            month=selected_month,
+            apple_sales=a_sales,
+            apple_fee=a_fee,
+            apple_kliq_fee=a_kliq,
+            apple_payout=a_pay,
+            google_sales=g_sales,
+            google_fee=g_fee,
+            google_kliq_fee=g_kliq,
+            google_payout=g_pay,
+            kliq_fee_pct=kliq_pct,
+        )
+        safe_name = app.replace(" ", "_").replace("/", "_")
+        filename = f"KLIQ_Receipt_{safe_name}_{selected_month}.pdf"
+
+        with rcpt_cols[idx % 4]:
+            st.download_button(
+                label=f"📄 {app}",
+                data=pdf_bytes,
+                file_name=filename,
+                mime="application/pdf",
+                key=f"rcpt_{idx}_{selected_month}",
+                use_container_width=True,
+            )
 else:
     st.info("No data for the selected month.")
 
