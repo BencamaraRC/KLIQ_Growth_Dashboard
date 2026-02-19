@@ -24,6 +24,11 @@ ADMIN_EMAILS = [
     e.strip().lower()
     for e in os.environ.get("ADMIN_EMAILS", "ben@joinkliq.io").split(",")
 ]
+APPROVED_EMAILS = [
+    e.strip().lower()
+    for e in os.environ.get("APPROVED_EMAILS", "will@joinkliq.io").split(",")
+    if e.strip()
+]
 
 # SMTP config for sending emails (set these env vars or defaults to Gmail SMTP)
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
@@ -95,6 +100,18 @@ def _get_db():
                     _boot_salt,
                     admin_email.split("@")[0].title(),
                 ),
+            )
+    conn.commit()
+
+    # Auto-approve pre-approved emails (upgrade pending → approved)
+    for approved_email in APPROVED_EMAILS:
+        row = conn.execute(
+            "SELECT status FROM users WHERE email = ?", (approved_email,)
+        ).fetchone()
+        if row and row[0] != "approved":
+            conn.execute(
+                "UPDATE users SET status = 'approved' WHERE email = ?",
+                (approved_email,),
             )
     conn.commit()
 
@@ -356,8 +373,10 @@ def register_user(email: str, password: str, full_name: str) -> tuple[bool, str]
     salt = secrets.token_hex(16)
     password_hash = _hash_password(password, salt)
 
-    # Auto-approve admin emails
-    status = "approved" if email in ADMIN_EMAILS else "pending"
+    # Auto-approve admin and pre-approved emails
+    status = (
+        "approved" if email in ADMIN_EMAILS or email in APPROVED_EMAILS else "pending"
+    )
 
     try:
         conn.execute(
