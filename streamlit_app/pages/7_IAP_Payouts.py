@@ -392,28 +392,39 @@ if combined.empty:
     st.stop()
 
 # ── Filters ──
-fcol1, fcol2, fcol3 = st.columns([3, 2, 1])
+fcol1, fcol2, fcol3, fcol4 = st.columns([3, 2, 2, 1])
 with fcol1:
     all_apps = sorted(combined["application_name"].unique())
     selected_apps = st.multiselect("Filter by App", options=all_apps, default=[])
 with fcol2:
     platform_filter = st.radio("Platform", ["All", "Apple", "Google"], horizontal=True)
 with fcol3:
+    all_months = sorted(combined["month"].unique(), reverse=True)
+    month_options = ["All Months"] + all_months
+    selected_month = st.selectbox("Month", month_options, index=1)
+with fcol4:
     if st.button("🔄 Refresh", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
-df = combined.copy()
+df_all = combined.copy()
 if selected_apps:
-    df = df[df["application_name"].isin(selected_apps)]
+    df_all = df_all[df_all["application_name"].isin(selected_apps)]
 if platform_filter != "All":
-    df = df[df["platform"] == platform_filter]
+    df_all = df_all[df_all["platform"] == platform_filter]
+
+# df_trend: all months (for chart), df: month-filtered (for KPI cards + table)
+df_trend = df_all.copy()
+df = df_all.copy()
+if selected_month != "All Months":
+    df = df[df["month"] == selected_month]
 
 if df.empty:
     st.info("No data for the selected filters.")
     st.stop()
 
 # ── KPI Cards ──
+_kpi_label = selected_month if selected_month != "All Months" else "All Time"
 total_sales = df["sales"].sum()
 total_platform_fee = df["platform_fee"].sum()
 total_kliq_fee = df["kliq_fee"].sum()
@@ -422,7 +433,9 @@ total_payout = df["payout"].sum()
 
 c1, c2, c3, c4, c5 = st.columns(5)
 with c1:
-    metric_card("Total Sales", fmt_currency(total_sales), "Gross customer price")
+    metric_card(
+        f"{_kpi_label} Sales", fmt_currency(total_sales), "Gross customer price"
+    )
 with c2:
     metric_card("Platform Fees", fmt_currency(total_platform_fee), "Apple/Google 30%")
 with c3:
@@ -438,7 +451,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.subheader("📈 Monthly Revenue Trend")
 
 monthly_agg = (
-    df.groupby(["month", "platform"])
+    df_trend.groupby(["month", "platform"])
     .agg(sales=("sales", "sum"), kliq_fee=("kliq_fee", "sum"), payout=("payout", "sum"))
     .reset_index()
     .sort_values("month")
@@ -481,33 +494,19 @@ fig.update_layout(
 )
 st.plotly_chart(fig, use_container_width=True)
 
-# ── Month-by-Month Payout Table ──
-st.subheader("📊 Month-by-Month Payout Breakdown")
+# ── Payout Breakdown Table ──
+st.subheader(f"📊 Payout Breakdown — {_kpi_label}")
 
-months_available = sorted(df["month"].unique(), reverse=True)
-selected_month = st.selectbox("Select Month", months_available, index=0)
-
-month_data = df[df["month"] == selected_month]
+# When a specific month is selected, show the pivot table for that month.
+# When "All Months" is selected, show the latest month's pivot.
+if selected_month != "All Months":
+    month_data = df.copy()
+else:
+    _latest = sorted(df["month"].unique(), reverse=True)[0]
+    month_data = df[df["month"] == _latest]
+    selected_month = _latest
 
 if not month_data.empty:
-    # Summary for selected month
-    m_sales = month_data["sales"].sum()
-    m_kliq_fee = month_data["kliq_fee"].sum()
-    m_refunds = month_data["refund_amount"].sum()
-    m_payout = month_data["payout"].sum()
-
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    with mc1:
-        metric_card(f"{selected_month} Sales", fmt_currency(m_sales))
-    with mc2:
-        metric_card(f"{selected_month} KLIQ Fee", fmt_currency(m_kliq_fee))
-    with mc3:
-        metric_card(f"{selected_month} Refunds", fmt_currency(m_refunds))
-    with mc4:
-        metric_card(f"{selected_month} Coach Payout", fmt_currency(m_payout))
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # Build pivot: Apple + Google side by side
     pivot_cols = [
         "sales",
@@ -871,7 +870,7 @@ st.markdown("---")
 st.subheader("📋 App Summary (All Time)")
 
 app_summary = (
-    df.groupby(["application_name", "platform"])
+    df_all.groupby(["application_name", "platform"])
     .agg(
         total_sales=("sales", "sum"),
         total_platform_fee=("platform_fee", "sum"),
@@ -911,7 +910,7 @@ st.markdown("---")
 st.subheader("🏆 Top 15 Apps by Sales")
 
 top_apps = (
-    df.groupby("application_name")
+    df_all.groupby("application_name")
     .agg(total_sales=("sales", "sum"), total_kliq=("kliq_fee", "sum"))
     .reset_index()
     .sort_values("total_sales", ascending=True)
