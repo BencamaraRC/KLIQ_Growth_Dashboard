@@ -490,30 +490,30 @@ if not month_data.empty:
     st.markdown("##### 🧾 Generate Payout Receipts")
     st.caption("Download a branded PDF receipt for any app's payout this month.")
 
+    # Build unit lookup from raw month_data (has total_units per platform)
+    _units = {}
+    for _, r in month_data.iterrows():
+        key = r["application_name"]
+        plat = r["platform"]
+        if key not in _units:
+            _units[key] = {"Apple": 0, "Google": 0}
+        _units[key][plat] = int(r.get("total_units", 0))
+
     rcpt_cols = st.columns(4)
     for idx, (_, row) in enumerate(pivoted.iterrows()):
         app = row["App"]
         kliq_pct = row.get("KLIQ %", 0)
         a_sales = row.get("Apple Sales", 0)
-        a_fee = row.get("Apple Fee (30%)", 0)
-        a_kliq = row.get("Apple KLIQ Fee", 0)
-        a_pay = row.get("Apple Payout", 0)
         g_sales = row.get("Google Sales", 0)
-        g_fee = row.get("Google Fee (30%)", 0)
-        g_kliq = row.get("Google KLIQ Fee", 0)
-        g_pay = row.get("Google Payout", 0)
+        units = _units.get(app, {"Apple": 0, "Google": 0})
 
         pdf_bytes = generate_receipt_pdf(
             app_name=app,
             month=selected_month,
             apple_sales=a_sales,
-            apple_fee=a_fee,
-            apple_kliq_fee=a_kliq,
-            apple_payout=a_pay,
+            apple_units=units["Apple"],
             google_sales=g_sales,
-            google_fee=g_fee,
-            google_kliq_fee=g_kliq,
-            google_payout=g_pay,
+            google_units=units["Google"],
             kliq_fee_pct=kliq_pct,
         )
         safe_name = app.replace(" ", "_").replace("/", "_")
