@@ -143,8 +143,7 @@ def generate_receipt_pdf(
     subtotal = apple_sales + google_sales
     kliq_fee = round(subtotal * kliq_fee_pct / 100, 2)
     total_refunds = round(apple_refunds + google_refunds, 2)
-    apple_platform_fee = round(apple_sales * 0.30, 2)
-    google_platform_fee = round(google_sales * 0.15, 2)
+    platform_fees = round(subtotal * 0.30, 2)
     # total_payout comes from the table (after platform fees + KLIQ fee + refunds)
 
     invoice_num = _generate_invoice_number(app_name, month)
@@ -248,13 +247,8 @@ def generate_receipt_pdf(
     # Subtotal (gross sales)
     line_items.append(["", "", "Subtotal", fmt(subtotal)])
 
-    # Platform Fees — Apple 30%, Google 15%
-    line_items.append(
-        ["", "", "Apple Platform Fee (30%)", f"-{fmt(apple_platform_fee)}"]
-    )
-    line_items.append(
-        ["", "", "Google Platform Fee (15%)", f"-{fmt(google_platform_fee)}"]
-    )
+    # Platform Fees (30%)
+    line_items.append(["", "", "Platform Fees (30%)", f"-{fmt(platform_fees)}"])
 
     # KLIQ Fee
     line_items.append(

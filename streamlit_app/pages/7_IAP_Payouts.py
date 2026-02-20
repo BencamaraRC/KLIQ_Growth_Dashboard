@@ -44,7 +44,7 @@ SHADOW_CARD = "0 2px 8px rgba(2,17,17,.06)"
 APPLE_COLOR = "#007AFF"
 GOOGLE_COLOR = "#34A853"
 APPLE_FEE_PCT = 30.0
-GOOGLE_FEE_PCT = 15.0
+GOOGLE_FEE_PCT = 30.0
 
 
 def T(name):
@@ -132,7 +132,7 @@ def load_google_monthly():
         e.month,
         COUNT(*) AS total_units,
         ROUND(SUM(e.amount_buyer * COALESCE(fx.rate, 1.0)), 2) AS sales,
-        ROUND(SUM(e.amount_buyer * COALESCE(fx.rate, 1.0)) * 0.85, 2) AS proceeds
+        ROUND(SUM(e.amount_buyer * COALESCE(fx.rate, 1.0)) * 0.70, 2) AS proceeds
     FROM {T('d1_google_earnings')} e
     LEFT JOIN fx_rates fx ON e.buyer_currency = fx.currency
     WHERE e.transaction_type = 'Charge'
@@ -329,9 +329,7 @@ c1, c2, c3, c4, c5 = st.columns(5)
 with c1:
     metric_card("Total Sales", fmt_currency(total_sales), "Gross customer price")
 with c2:
-    metric_card(
-        "Platform Fees", fmt_currency(total_platform_fee), "Apple 30% / Google 15%"
-    )
+    metric_card("Platform Fees", fmt_currency(total_platform_fee), "Apple/Google 30%")
 with c3:
     metric_card("KLIQ Fee", fmt_currency(total_kliq_fee), "KLIQ % of gross")
 with c4:
@@ -447,7 +445,7 @@ if not month_data.empty:
     google_df = google_df.rename(
         columns={
             "sales": "Google Sales",
-            "platform_fee": "Google Fee (15%)",
+            "platform_fee": "Google Fee (30%)",
             "proceeds": "Google Proceeds",
             "kliq_fee_pct": "KLIQ % (G)",
             "kliq_fee": "Google KLIQ Fee",
@@ -469,7 +467,7 @@ if not month_data.empty:
         "Apple Refunds",
         "Apple Payout",
         "Google Sales",
-        "Google Fee (15%)",
+        "Google Fee (30%)",
         "Google Proceeds",
         "Google KLIQ Fee",
         "Google Refunds",
@@ -504,7 +502,7 @@ if not month_data.empty:
         "Apple Refunds",
         "Apple Payout",
         "Google Sales",
-        "Google Fee (15%)",
+        "Google Fee (30%)",
         "Google KLIQ Fee",
         "Google Refunds",
         "Google Payout",
@@ -525,7 +523,7 @@ if not month_data.empty:
     }
     google_cols = {
         "Google Sales",
-        "Google Fee (15%)",
+        "Google Fee (30%)",
         "Google Proceeds",
         "Google KLIQ Fee",
         "Google Refunds",
@@ -735,7 +733,7 @@ st.markdown(
         <ul style="color:{NEUTRAL}; font-size:13px; margin:0; padding-left:20px;">
             <li><strong>Apple</strong> pays out ~33 days after fiscal month end (~60 days from sale)</li>
             <li><strong>Google</strong> pays out on the 15th of the following month (~45 days from sale)</li>
-            <li><strong>Apple</strong> takes a <strong>30% commission</strong>; <strong>Google</strong> takes <strong>15%</strong> (small business program)</li>
+            <li>Both platforms take a <strong>30% commission</strong> (15% for qualifying small businesses)</li>
             <li>KLIQ fee is calculated on <strong>gross sales</strong> (before platform fee)</li>
             <li>Refunds are deducted from the coach payout when customers request them</li>
             <li>Payout = Total Sales − Platform Fee − KLIQ Fee − Refunds</li>
