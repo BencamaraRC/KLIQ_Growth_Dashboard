@@ -2354,6 +2354,110 @@ def refresh_d1_play_store_performance():
     print("  ✅ Google Play reports complete")
 
 
+def refresh_d1_google_earnings():
+    """Pull Google Play earnings reports from GCS bucket.
+
+    Each monthly ZIP contains a UTF-8 CSV with columns:
+      Description, Transaction Date, Transaction Time, Tax Type,
+      Transaction Type, Refund Type, Product Title, Package ID,
+      Product Type, Sku Id, Buyer Country, Buyer Currency,
+      Amount (Buyer Currency), Currency Conversion Rate,
+      Merchant Currency, Amount (Merchant Currency), Service Fee %, ...
+
+    Transaction Types: Charge, Google fee, Charge refund, Google fee refund, Tax
+    """
+    import re
+    import zipfile
+
+    if not PLAY_BUCKET_ID:
+        print("  ⚠️  PLAY_BUCKET_ID not set — skipping Google Play earnings")
+        return
+
+    from google.cloud import storage
+
+    storage_client = storage.Client(credentials=credentials, project=SOURCE_PROJECT)
+    bucket = storage_client.bucket(PLAY_BUCKET_ID)
+
+    blobs = sorted(bucket.list_blobs(prefix="earnings/"), key=lambda b: b.name)
+    print(f"  Found {len(blobs)} earnings files")
+
+    all_dfs = []
+    for blob in blobs:
+        try:
+            data = blob.download_as_bytes()
+            zf = zipfile.ZipFile(io.BytesIO(data))
+            name = zf.namelist()[0]
+            raw = zf.read(name)
+            df = pd.read_csv(io.BytesIO(raw), encoding="utf-8")
+            if len(df) > 0:
+                all_dfs.append(df)
+        except Exception as e:
+            print(f"    ⚠️  Error reading {blob.name}: {e}")
+
+    if not all_dfs:
+        print("  ⚠️  No earnings data found")
+        return
+
+    combined = pd.concat(all_dfs, ignore_index=True)
+
+    # Extract app name from Product Title, e.g. "Monthly Subscription (Tony T Sports)" → "Tony T Sports"
+    def _extract_app(title):
+        if pd.isna(title):
+            return None
+        m = re.search(r"\(([^)]+)\)$", str(title).strip())
+        return m.group(1) if m else str(title).strip()
+
+    combined["application_name"] = combined["Product Title"].apply(_extract_app)
+
+    # Parse transaction date
+    combined["transaction_date"] = pd.to_datetime(
+        combined["Transaction Date"], format="mixed", dayfirst=False
+    )
+    combined["month"] = combined["transaction_date"].dt.strftime("%Y-%m")
+
+    # Normalise column names
+    out = combined.rename(
+        columns={
+            "Transaction Type": "transaction_type",
+            "Refund Type": "refund_type",
+            "Tax Type": "tax_type",
+            "Product Title": "product_title",
+            "Sku Id": "sku_id",
+            "Buyer Country": "buyer_country",
+            "Buyer Currency": "buyer_currency",
+            "Amount (Buyer Currency)": "amount_buyer",
+            "Currency Conversion Rate": "fx_rate",
+            "Merchant Currency": "merchant_currency",
+            "Amount (Merchant Currency)": "amount_merchant",
+            "Service Fee %": "service_fee_pct",
+            "Package ID": "package_id",
+        }
+    )
+
+    keep_cols = [
+        "application_name",
+        "month",
+        "transaction_date",
+        "transaction_type",
+        "refund_type",
+        "tax_type",
+        "product_title",
+        "sku_id",
+        "buyer_country",
+        "buyer_currency",
+        "amount_buyer",
+        "fx_rate",
+        "merchant_currency",
+        "amount_merchant",
+        "service_fee_pct",
+        "package_id",
+    ]
+    out = out[[c for c in keep_cols if c in out.columns]]
+
+    write_table(out, "d1_google_earnings")
+    print(f"    Transaction types: {out['transaction_type'].value_counts().to_dict()}")
+
+
 # ═══════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════
@@ -2401,6 +2505,7 @@ def main():
 
     print("\n📊 Google Play Console (Store Performance, Installs, Ratings):")
     refresh_d1_play_store_performance()
+    refresh_d1_google_earnings()
 
     print("\n📊 App Performance:")
     refresh_d1_app_engagement()

@@ -57,6 +57,8 @@ def generate_receipt_pdf(
     kliq_fee_pct=0.0,
     total_payout=0.0,
     payment_date=None,
+    apple_refunds=0.0,
+    google_refunds=0.0,
 ):
     """Generate a branded PDF receipt. Returns bytes."""
     buf = io.BytesIO()
@@ -140,7 +142,10 @@ def generate_receipt_pdf(
     # ── Compute values ──
     subtotal = apple_sales + google_sales
     kliq_fee = round(subtotal * kliq_fee_pct / 100, 2)
-    # total_payout comes from the table (after platform 30% + KLIQ fee deductions)
+    total_refunds = round(apple_refunds + google_refunds, 2)
+    apple_platform_fee = round(apple_sales * 0.30, 2)
+    google_platform_fee = round(google_sales * 0.15, 2)
+    # total_payout comes from the table (after platform fees + KLIQ fee + refunds)
 
     invoice_num = _generate_invoice_number(app_name, month)
     if not payment_date:
@@ -243,14 +248,22 @@ def generate_receipt_pdf(
     # Subtotal (gross sales)
     line_items.append(["", "", "Subtotal", fmt(subtotal)])
 
-    # Platform Fees (30%)
-    platform_fees = round(subtotal * 0.30, 2)
-    line_items.append(["", "", "Platform Fees (30%)", f"-{fmt(platform_fees)}"])
+    # Platform Fees — Apple 30%, Google 15%
+    line_items.append(
+        ["", "", "Apple Platform Fee (30%)", f"-{fmt(apple_platform_fee)}"]
+    )
+    line_items.append(
+        ["", "", "Google Platform Fee (15%)", f"-{fmt(google_platform_fee)}"]
+    )
 
     # KLIQ Fee
     line_items.append(
         ["", "", f"KLIQ Fee - *Gross Sales {kliq_fee_pct:.1f}%", f"-{fmt(kliq_fee)}"]
     )
+
+    # Refunds (only show if > 0)
+    if total_refunds > 0:
+        line_items.append(["", "", "Refunds", f"-{fmt(total_refunds)}"])
 
     # Total Payout (passed from the table, after all deductions)
     line_items.append(["", "", "Total Payout", fmt(total_payout)])
@@ -287,7 +300,14 @@ def generate_receipt_pdf(
     ]
 
     total_row_idx = len(line_items) - 1
-    subtotal_row_idx = total_row_idx - 3  # Subtotal row
+    # Walk backwards to find subtotal row (first row after blank separator)
+    subtotal_row_idx = None
+    for ri in range(total_row_idx - 1, 0, -1):
+        if line_items[ri][2] == "Subtotal":
+            subtotal_row_idx = ri
+            break
+    if subtotal_row_idx is None:
+        subtotal_row_idx = total_row_idx - 4
 
     # Subtotal line above
     style_cmds.append(
@@ -297,17 +317,15 @@ def generate_receipt_pdf(
         ("FONTNAME", (2, subtotal_row_idx), (-1, subtotal_row_idx), "Helvetica-Bold")
     )
 
-    # Platform Fees row
-    style_cmds.append(
-        ("FONTNAME", (2, total_row_idx - 2), (-1, total_row_idx - 2), "Helvetica")
-    )
-    style_cmds.append(("FONTSIZE", (2, total_row_idx - 2), (-1, total_row_idx - 2), 9))
-
-    # KLIQ Fee row
-    style_cmds.append(
-        ("FONTNAME", (2, total_row_idx - 1), (-1, total_row_idx - 1), "Helvetica")
-    )
-    style_cmds.append(("FONTSIZE", (2, total_row_idx - 1), (-1, total_row_idx - 1), 9))
+    # Style deduction rows (between subtotal and total) as smaller text
+    for di in range(subtotal_row_idx + 1, total_row_idx):
+        style_cmds.append(("FONTNAME", (2, di), (-1, di), "Helvetica"))
+        style_cmds.append(("FONTSIZE", (2, di), (-1, di), 9))
+        # Highlight refund row in red if present
+        if line_items[di][2] == "Refunds":
+            style_cmds.append(
+                ("TEXTCOLOR", (2, di), (-1, di), colors.HexColor("#C0392B"))
+            )
 
     # Total row - bold and highlighted
     style_cmds.extend(

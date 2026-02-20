@@ -44,7 +44,7 @@ SHADOW_CARD = "0 2px 8px rgba(2,17,17,.06)"
 APPLE_COLOR = "#007AFF"
 GOOGLE_COLOR = "#34A853"
 APPLE_FEE_PCT = 30.0
-GOOGLE_FEE_PCT = 30.0
+GOOGLE_FEE_PCT = 15.0
 
 
 def T(name):
@@ -126,46 +126,88 @@ def load_google_monthly():
             STRUCT('AED', 0.272), STRUCT('INR', 0.012), STRUCT('ZAR', 0.054),
             STRUCT('RON', 0.22)
         ])
-    ),
-    apple_sku_prices AS (
-        SELECT
-            sku,
-            ROUND(AVG(SAFE_CAST(customer_price AS FLOAT64) * COALESCE(fx.rate, 1.0)), 2) AS avg_price
-        FROM {T('d1_appstore_sales')} s
-        LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
-        WHERE s.product_type_identifier IN ('IA1', 'IAY')
-          AND SAFE_CAST(customer_price AS FLOAT64) > 0
-        GROUP BY sku
-    ),
-    ios_avg AS (
-        SELECT ROUND(AVG(SAFE_CAST(customer_price AS FLOAT64) * COALESCE(fx.rate, 1.0)), 2) AS fallback_price
-        FROM {T('d1_appstore_sales')} s
-        LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
-        WHERE s.product_type_identifier IN ('IA1', 'IAY')
-          AND SAFE_CAST(customer_price AS FLOAT64) > 0
-    ),
-    gplay_events AS (
-        SELECT
-            a.application_name,
-            DATE_TRUNC(DATE(e.event_date), MONTH) AS month_dt,
-            JSON_VALUE(e.data, '$.in_app_product_id') AS product_id
-        FROM `{DATA_PROJECT}.prod_dataset.events` e
-        LEFT JOIN `{DATA_PROJECT}.prod_dataset.applications` a
-            ON e.application_id = a.id
-        WHERE e.event_name = 'purchase_success'
     )
     SELECT
-        g.application_name,
-        FORMAT_DATE("%Y-%m", g.month_dt) AS month,
+        e.application_name,
+        e.month,
         COUNT(*) AS total_units,
-        ROUND(SUM(COALESCE(ap.avg_price, iavg.fallback_price)), 2) AS sales,
-        ROUND(SUM(COALESCE(ap.avg_price, iavg.fallback_price)) * 0.70, 2) AS proceeds
-    FROM gplay_events g
-    LEFT JOIN apple_sku_prices ap ON g.product_id = ap.sku
-    CROSS JOIN ios_avg iavg
-    WHERE g.application_name IS NOT NULL
-    GROUP BY g.application_name, g.month_dt
-    ORDER BY g.application_name, month
+        ROUND(SUM(e.amount_buyer * COALESCE(fx.rate, 1.0)), 2) AS sales,
+        ROUND(SUM(e.amount_buyer * COALESCE(fx.rate, 1.0)) * 0.85, 2) AS proceeds
+    FROM {T('d1_google_earnings')} e
+    LEFT JOIN fx_rates fx ON e.buyer_currency = fx.currency
+    WHERE e.transaction_type = 'Charge'
+      AND e.application_name IS NOT NULL
+    GROUP BY e.application_name, e.month
+    ORDER BY e.application_name, e.month
+    """
+    return run_query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_apple_refunds():
+    sql = f"""
+    WITH fx_rates AS (
+        SELECT currency, rate FROM UNNEST([
+            STRUCT('USD' AS currency, 1.0 AS rate),
+            STRUCT('GBP', 1.27), STRUCT('EUR', 1.08), STRUCT('AUD', 0.64),
+            STRUCT('CAD', 0.72), STRUCT('CHF', 1.13), STRUCT('DKK', 0.145),
+            STRUCT('NOK', 0.093), STRUCT('SEK', 0.095), STRUCT('NZD', 0.60),
+            STRUCT('SGD', 0.75), STRUCT('HUF', 0.0027), STRUCT('CLP', 0.00105),
+            STRUCT('COP', 0.00024), STRUCT('CZK', 0.042), STRUCT('PLN', 0.25),
+            STRUCT('BRL', 0.19), STRUCT('MXN', 0.055), STRUCT('TRY', 0.031),
+            STRUCT('RUB', 0.011), STRUCT('ILS', 0.28), STRUCT('SAR', 0.267),
+            STRUCT('AED', 0.272), STRUCT('INR', 0.012), STRUCT('ZAR', 0.054),
+            STRUCT('RON', 0.22)
+        ])
+    ),
+    sku_map AS (
+        SELECT DISTINCT product_id, application_name
+        FROM {T('d1_inapp_products')}
+    )
+    SELECT
+        COALESCE(m.application_name, 'Unknown') AS application_name,
+        FORMAT_DATE("%Y-%m", s.report_date) AS month,
+        SUM(SAFE_CAST(s.units AS INT64)) AS refund_units,
+        ROUND(ABS(SUM(SAFE_CAST(s.customer_price AS FLOAT64) * SAFE_CAST(s.units AS INT64) * COALESCE(fx.rate, 1.0))), 2) AS refund_amount
+    FROM {T('d1_appstore_sales')} s
+    LEFT JOIN sku_map m ON s.sku = m.product_id
+    LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
+    WHERE s.product_type_identifier IN ('IA1', 'IAY')
+      AND SAFE_CAST(s.units AS INT64) < 0
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    """
+    return run_query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_google_refunds():
+    sql = f"""
+    WITH fx_rates AS (
+        SELECT currency, rate FROM UNNEST([
+            STRUCT('USD' AS currency, 1.0 AS rate),
+            STRUCT('GBP', 1.27), STRUCT('EUR', 1.08), STRUCT('AUD', 0.64),
+            STRUCT('CAD', 0.72), STRUCT('CHF', 1.13), STRUCT('DKK', 0.145),
+            STRUCT('NOK', 0.093), STRUCT('SEK', 0.095), STRUCT('NZD', 0.60),
+            STRUCT('SGD', 0.75), STRUCT('HUF', 0.0027), STRUCT('CLP', 0.00105),
+            STRUCT('COP', 0.00024), STRUCT('CZK', 0.042), STRUCT('PLN', 0.25),
+            STRUCT('BRL', 0.19), STRUCT('MXN', 0.055), STRUCT('TRY', 0.031),
+            STRUCT('RUB', 0.011), STRUCT('ILS', 0.28), STRUCT('SAR', 0.267),
+            STRUCT('AED', 0.272), STRUCT('INR', 0.012), STRUCT('ZAR', 0.054),
+            STRUCT('RON', 0.22)
+        ])
+    )
+    SELECT
+        e.application_name,
+        e.month,
+        COUNT(*) AS refund_units,
+        ROUND(ABS(SUM(e.amount_buyer * COALESCE(fx.rate, 1.0))), 2) AS refund_amount
+    FROM {T('d1_google_earnings')} e
+    LEFT JOIN fx_rates fx ON e.buyer_currency = fx.currency
+    WHERE e.transaction_type = 'Charge refund'
+      AND e.application_name IS NOT NULL
+    GROUP BY 1, 2
+    ORDER BY 1, 2
     """
     return run_query(sql)
 
@@ -198,7 +240,9 @@ def fmt_currency(val, prefix="$"):
     return f"{prefix}{val:,.2f}"
 
 
-def compute_breakdown(df_platform, fee_lookup, platform_fee_pct, platform_name):
+def compute_breakdown(
+    df_platform, fee_lookup, platform_fee_pct, platform_name, refunds_df=None
+):
     if df_platform.empty:
         return pd.DataFrame()
     df = df_platform.merge(fee_lookup, on="application_name", how="left")
@@ -207,7 +251,24 @@ def compute_breakdown(df_platform, fee_lookup, platform_fee_pct, platform_name):
     df["proceeds"] = (df["sales"] - df["platform_fee"]).round(2)
     df["kliq_fee_pct"] = df["kliq_fee_pct"].fillna(0)
     df["kliq_fee"] = (df["sales"] * df["kliq_fee_pct"] / 100).round(2)
-    df["payout"] = (df["sales"] - df["platform_fee"] - df["kliq_fee"]).round(2)
+    # Merge refunds
+    df["refund_amount"] = 0.0
+    df["refund_units"] = 0
+    if refunds_df is not None and not refunds_df.empty:
+        ref = refunds_df.rename(
+            columns={"refund_amount": "_ref_amt", "refund_units": "_ref_units"}
+        )
+        df = df.merge(
+            ref[["application_name", "month", "_ref_amt", "_ref_units"]],
+            on=["application_name", "month"],
+            how="left",
+        )
+        df["refund_amount"] = df["_ref_amt"].fillna(0).round(2)
+        df["refund_units"] = df["_ref_units"].fillna(0).astype(int).abs()
+        df = df.drop(columns=["_ref_amt", "_ref_units"])
+    df["payout"] = (
+        df["sales"] - df["platform_fee"] - df["kliq_fee"] - df["refund_amount"]
+    ).round(2)
     df["platform"] = platform_name
     return df
 
@@ -219,12 +280,16 @@ try:
     apple_raw = load_apple_monthly()
     google_raw = load_google_monthly()
     fee_lookup = load_fee_lookup()
+    apple_refunds = load_apple_refunds()
+    google_refunds = load_google_refunds()
 except Exception as e:
     st.error(f"Failed to load data from BigQuery: {e}")
     st.stop()
 
-apple = compute_breakdown(apple_raw, fee_lookup, APPLE_FEE_PCT, "Apple")
-google = compute_breakdown(google_raw, fee_lookup, GOOGLE_FEE_PCT, "Google")
+apple = compute_breakdown(apple_raw, fee_lookup, APPLE_FEE_PCT, "Apple", apple_refunds)
+google = compute_breakdown(
+    google_raw, fee_lookup, GOOGLE_FEE_PCT, "Google", google_refunds
+)
 combined = pd.concat([apple, google], ignore_index=True)
 
 if combined.empty:
@@ -257,17 +322,22 @@ if df.empty:
 total_sales = df["sales"].sum()
 total_platform_fee = df["platform_fee"].sum()
 total_kliq_fee = df["kliq_fee"].sum()
+total_refunds = df["refund_amount"].sum()
 total_payout = df["payout"].sum()
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 with c1:
     metric_card("Total Sales", fmt_currency(total_sales), "Gross customer price")
 with c2:
-    metric_card("Platform Fees", fmt_currency(total_platform_fee), "Apple/Google 30%")
+    metric_card(
+        "Platform Fees", fmt_currency(total_platform_fee), "Apple 30% / Google 15%"
+    )
 with c3:
     metric_card("KLIQ Fee", fmt_currency(total_kliq_fee), "KLIQ % of gross")
 with c4:
-    metric_card("Coach Payout", fmt_currency(total_payout), "Sales − fees")
+    metric_card("Refunds", fmt_currency(total_refunds), "Customer refunds")
+with c5:
+    metric_card("Coach Payout", fmt_currency(total_payout), "Sales − fees − refunds")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -330,14 +400,17 @@ if not month_data.empty:
     # Summary for selected month
     m_sales = month_data["sales"].sum()
     m_kliq_fee = month_data["kliq_fee"].sum()
+    m_refunds = month_data["refund_amount"].sum()
     m_payout = month_data["payout"].sum()
 
-    mc1, mc2, mc3 = st.columns(3)
+    mc1, mc2, mc3, mc4 = st.columns(4)
     with mc1:
         metric_card(f"{selected_month} Sales", fmt_currency(m_sales))
     with mc2:
         metric_card(f"{selected_month} KLIQ Fee", fmt_currency(m_kliq_fee))
     with mc3:
+        metric_card(f"{selected_month} Refunds", fmt_currency(m_refunds))
+    with mc4:
         metric_card(f"{selected_month} Coach Payout", fmt_currency(m_payout))
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -349,6 +422,7 @@ if not month_data.empty:
         "proceeds",
         "kliq_fee_pct",
         "kliq_fee",
+        "refund_amount",
         "payout",
     ]
 
@@ -362,6 +436,7 @@ if not month_data.empty:
             "proceeds": "Apple Proceeds",
             "kliq_fee_pct": "KLIQ %",
             "kliq_fee": "Apple KLIQ Fee",
+            "refund_amount": "Apple Refunds",
             "payout": "Apple Payout",
         }
     )
@@ -372,10 +447,11 @@ if not month_data.empty:
     google_df = google_df.rename(
         columns={
             "sales": "Google Sales",
-            "platform_fee": "Google Fee (30%)",
+            "platform_fee": "Google Fee (15%)",
             "proceeds": "Google Proceeds",
             "kliq_fee_pct": "KLIQ % (G)",
             "kliq_fee": "Google KLIQ Fee",
+            "refund_amount": "Google Refunds",
             "payout": "Google Payout",
         }
     )
@@ -390,11 +466,13 @@ if not month_data.empty:
         "Apple Fee (30%)",
         "Apple Proceeds",
         "Apple KLIQ Fee",
+        "Apple Refunds",
         "Apple Payout",
         "Google Sales",
-        "Google Fee (30%)",
+        "Google Fee (15%)",
         "Google Proceeds",
         "Google KLIQ Fee",
+        "Google Refunds",
         "Google Payout",
     ]
     for c in money_cols:
@@ -406,6 +484,16 @@ if not month_data.empty:
         pivoted.get("Apple Payout", 0) + pivoted.get("Google Payout", 0)
     ).round(2)
 
+    # Refund flag: highlight rows with any refunds
+    pivoted["Refund Flag"] = ""
+    apple_ref = pivoted.get("Apple Refunds", 0)
+    google_ref = pivoted.get("Google Refunds", 0)
+    has_refund = (
+        (apple_ref > 0) | (google_ref > 0) if not isinstance(apple_ref, int) else False
+    )
+    if isinstance(has_refund, pd.Series):
+        pivoted.loc[has_refund, "Refund Flag"] = "⚠️"
+
     pivoted = pivoted.rename(columns={"application_name": "App"})
     col_order = [
         "App",
@@ -413,12 +501,15 @@ if not month_data.empty:
         "Apple Sales",
         "Apple Fee (30%)",
         "Apple KLIQ Fee",
+        "Apple Refunds",
         "Apple Payout",
         "Google Sales",
-        "Google Fee (30%)",
+        "Google Fee (15%)",
         "Google KLIQ Fee",
+        "Google Refunds",
         "Google Payout",
         "Total Payout",
+        "Refund Flag",
     ]
     col_order = [c for c in col_order if c in pivoted.columns]
     pivoted = pivoted[col_order].sort_values("Total Payout", ascending=False)
@@ -429,15 +520,18 @@ if not month_data.empty:
         "Apple Fee (30%)",
         "Apple Proceeds",
         "Apple KLIQ Fee",
+        "Apple Refunds",
         "Apple Payout",
     }
     google_cols = {
         "Google Sales",
-        "Google Fee (30%)",
+        "Google Fee (15%)",
         "Google Proceeds",
         "Google KLIQ Fee",
+        "Google Refunds",
         "Google Payout",
     }
+    refund_cols = {"Apple Refunds", "Google Refunds"}
     total_cols = {"Total Payout"}
 
     APPLE_BG, GOOGLE_BG, TOTAL_BG = "#EBF5FB", "#E8F8F5", "#FEF9E7"
@@ -461,9 +555,16 @@ if not month_data.empty:
             return HDR_TOTAL
         return DARK
 
+    REFUND_BG = "#FDEDEC"
+    HDR_REFUND = "#C0392B"
+
     def fmt_val(col, val):
         money = apple_cols | google_cols | total_cols
         if col in money:
+            if col in refund_cols and val > 0:
+                return (
+                    f'<span style="color:#C0392B; font-weight:600;">-${val:,.2f}</span>'
+                )
             return f"${val:,.2f}"
         if col == "KLIQ %":
             return f"{val:.1f}%"
@@ -479,7 +580,10 @@ if not month_data.empty:
         html += "<tr>"
         for c in cols:
             align = "left" if c == "App" else "right"
-            html += f'<td style="background:{col_bg(c)}; padding:6px 12px; text-align:{align}; white-space:nowrap; border:1px solid #eee;">{fmt_val(c, row[c])}</td>'
+            bg = col_bg(c)
+            if c in refund_cols and row[c] > 0:
+                bg = REFUND_BG
+            html += f'<td style="background:{bg}; padding:6px 12px; text-align:{align}; white-space:nowrap; border:1px solid #eee;">{fmt_val(c, row[c])}</td>'
         html += "</tr>"
     html += "</tbody></table></div>"
 
@@ -509,6 +613,9 @@ if not month_data.empty:
 
         t_payout = row.get("Total Payout", 0)
 
+        a_refund = row.get("Apple Refunds", 0)
+        g_refund = row.get("Google Refunds", 0)
+
         pdf_bytes = generate_receipt_pdf(
             app_name=app,
             month=selected_month,
@@ -518,6 +625,8 @@ if not month_data.empty:
             google_units=units["Google"],
             kliq_fee_pct=kliq_pct,
             total_payout=t_payout,
+            apple_refunds=a_refund,
+            google_refunds=g_refund,
         )
         safe_name = app.replace(" ", "_").replace("/", "_")
         filename = f"KLIQ_Receipt_{safe_name}_{selected_month}.pdf"
@@ -626,9 +735,10 @@ st.markdown(
         <ul style="color:{NEUTRAL}; font-size:13px; margin:0; padding-left:20px;">
             <li><strong>Apple</strong> pays out ~33 days after fiscal month end (~60 days from sale)</li>
             <li><strong>Google</strong> pays out on the 15th of the following month (~45 days from sale)</li>
-            <li>Both platforms take a <strong>30% commission</strong> (15% for qualifying small businesses)</li>
+            <li><strong>Apple</strong> takes a <strong>30% commission</strong>; <strong>Google</strong> takes <strong>15%</strong> (small business program)</li>
             <li>KLIQ fee is calculated on <strong>gross sales</strong> (before platform fee)</li>
-            <li>Payout = Total Sales − Platform Fee (30%) − KLIQ Fee</li>
+            <li>Refunds are deducted from the coach payout when customers request them</li>
+            <li>Payout = Total Sales − Platform Fee − KLIQ Fee − Refunds</li>
         </ul>
     </div>
     """,
