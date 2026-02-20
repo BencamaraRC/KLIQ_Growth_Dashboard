@@ -55,6 +55,7 @@ def generate_receipt_pdf(
     google_sales=0.0,
     google_units=0,
     kliq_fee_pct=0.0,
+    total_payout=0.0,
     payment_date=None,
 ):
     """Generate a branded PDF receipt. Returns bytes."""
@@ -136,10 +137,10 @@ def generate_receipt_pdf(
 
     elements = []
 
-    # ── Compute all values from raw sales ──
+    # ── Compute values ──
     subtotal = apple_sales + google_sales
     kliq_fee = round(subtotal * kliq_fee_pct / 100, 2)
-    total_payout = round(subtotal - kliq_fee, 2)
+    # total_payout comes from the table (after platform 30% + KLIQ fee deductions)
 
     invoice_num = _generate_invoice_number(app_name, month)
     if not payment_date:
@@ -239,16 +240,20 @@ def generate_receipt_pdf(
     # Blank separator row
     line_items.append(["", "", "", ""])
 
-    # Subtotal
+    # Subtotal (gross sales)
     line_items.append(["", "", "Subtotal", fmt(subtotal)])
+
+    # Platform Fees (30%)
+    platform_fees = round(subtotal * 0.30, 2)
+    line_items.append(["", "", "Platform Fees (30%)", f"-{fmt(platform_fees)}"])
 
     # KLIQ Fee
     line_items.append(
-        ["", "", f"KLIQ Fee - *Gross Sales {kliq_fee_pct:.1f}%", fmt(kliq_fee)]
+        ["", "", f"KLIQ Fee - *Gross Sales {kliq_fee_pct:.1f}%", f"-{fmt(kliq_fee)}"]
     )
 
-    # Total
-    line_items.append(["", "", "Total", fmt(total_payout)])
+    # Total Payout (passed from the table, after all deductions)
+    line_items.append(["", "", "Total Payout", fmt(total_payout)])
 
     col_widths = [45 * mm, 30 * mm, 45 * mm, 40 * mm]
     items_table = Table(line_items, colWidths=col_widths)
@@ -282,7 +287,7 @@ def generate_receipt_pdf(
     ]
 
     total_row_idx = len(line_items) - 1
-    subtotal_row_idx = total_row_idx - 2
+    subtotal_row_idx = total_row_idx - 3  # Subtotal row
 
     # Subtotal line above
     style_cmds.append(
@@ -291,6 +296,12 @@ def generate_receipt_pdf(
     style_cmds.append(
         ("FONTNAME", (2, subtotal_row_idx), (-1, subtotal_row_idx), "Helvetica-Bold")
     )
+
+    # Platform Fees row
+    style_cmds.append(
+        ("FONTNAME", (2, total_row_idx - 2), (-1, total_row_idx - 2), "Helvetica")
+    )
+    style_cmds.append(("FONTSIZE", (2, total_row_idx - 2), (-1, total_row_idx - 2), 9))
 
     # KLIQ Fee row
     style_cmds.append(

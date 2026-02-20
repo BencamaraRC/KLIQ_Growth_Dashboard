@@ -507,6 +507,8 @@ if not month_data.empty:
         g_sales = row.get("Google Sales", 0)
         units = _units.get(app, {"Apple": 0, "Google": 0})
 
+        t_payout = row.get("Total Payout", 0)
+
         pdf_bytes = generate_receipt_pdf(
             app_name=app,
             month=selected_month,
@@ -515,6 +517,7 @@ if not month_data.empty:
             google_sales=g_sales,
             google_units=units["Google"],
             kliq_fee_pct=kliq_pct,
+            total_payout=t_payout,
         )
         safe_name = app.replace(" ", "_").replace("/", "_")
         filename = f"KLIQ_Receipt_{safe_name}_{selected_month}.pdf"
