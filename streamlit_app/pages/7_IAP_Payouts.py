@@ -286,6 +286,14 @@ except Exception as e:
     st.error(f"Failed to load data from BigQuery: {e}")
     st.stop()
 
+# Normalise Google app names to match Apple canonical names (case mismatches)
+_canon = {n.lower(): n for n in apple_raw["application_name"].unique() if n}
+for _df in [google_raw, google_refunds]:
+    if _df is not None and not _df.empty and "application_name" in _df.columns:
+        _df["application_name"] = _df["application_name"].apply(
+            lambda x: _canon.get(x.lower(), x) if isinstance(x, str) else x
+        )
+
 apple = compute_breakdown(apple_raw, fee_lookup, APPLE_FEE_PCT, "Apple", apple_refunds)
 google = compute_breakdown(
     google_raw, fee_lookup, GOOGLE_FEE_PCT, "Google", google_refunds
