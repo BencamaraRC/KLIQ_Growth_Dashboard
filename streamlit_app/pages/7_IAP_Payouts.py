@@ -218,6 +218,91 @@ def load_fee_lookup():
     return run_query(sql)
 
 
+@st.cache_data(ttl=600)
+def load_apple_product_details():
+    sql = f"""
+    WITH fx_rates AS (
+        SELECT currency, rate FROM UNNEST([
+            STRUCT('USD' AS currency, 1.0 AS rate),
+            STRUCT('GBP', 1.27), STRUCT('EUR', 1.08), STRUCT('AUD', 0.64),
+            STRUCT('CAD', 0.72), STRUCT('CHF', 1.13), STRUCT('DKK', 0.145),
+            STRUCT('NOK', 0.093), STRUCT('SEK', 0.095), STRUCT('NZD', 0.60),
+            STRUCT('SGD', 0.75), STRUCT('HUF', 0.0027), STRUCT('CLP', 0.00105),
+            STRUCT('COP', 0.00024), STRUCT('CZK', 0.042), STRUCT('PLN', 0.25),
+            STRUCT('BRL', 0.19), STRUCT('MXN', 0.055), STRUCT('TRY', 0.031),
+            STRUCT('RUB', 0.011), STRUCT('ILS', 0.28), STRUCT('SAR', 0.267),
+            STRUCT('AED', 0.272), STRUCT('INR', 0.012), STRUCT('ZAR', 0.054),
+            STRUCT('RON', 0.22)
+        ])
+    ),
+    sku_map AS (
+        SELECT DISTINCT product_id, application_name
+        FROM {T('d1_inapp_products')}
+    )
+    SELECT
+        COALESCE(m.application_name, 'Unknown') AS application_name,
+        FORMAT_DATE("%Y-%m", s.report_date) AS month,
+        s.sku AS product_id,
+        s.title AS product_name,
+        s.subscription AS sub_type,
+        s.period,
+        SUM(SAFE_CAST(s.units AS INT64)) AS units,
+        ROUND(SUM(SAFE_CAST(s.customer_price AS FLOAT64)
+              * SAFE_CAST(s.units AS INT64)
+              * COALESCE(fx.rate, 1.0)), 2) AS revenue_usd
+    FROM {T('d1_appstore_sales')} s
+    LEFT JOIN sku_map m ON s.sku = m.product_id
+    LEFT JOIN fx_rates fx ON s.customer_currency = fx.currency
+    WHERE s.product_type_identifier IN ('IA1', 'IAY')
+      AND SAFE_CAST(s.units AS INT64) > 0
+    GROUP BY 1, 2, 3, 4, 5, 6
+    ORDER BY 1, 2, revenue_usd DESC
+    """
+    return run_query(sql)
+
+
+@st.cache_data(ttl=600)
+def load_google_product_details():
+    sql = f"""
+    WITH fx_rates AS (
+        SELECT currency, rate FROM UNNEST([
+            STRUCT('USD' AS currency, 1.0 AS rate),
+            STRUCT('GBP', 1.27), STRUCT('EUR', 1.08), STRUCT('AUD', 0.64),
+            STRUCT('CAD', 0.72), STRUCT('CHF', 1.13), STRUCT('DKK', 0.145),
+            STRUCT('NOK', 0.093), STRUCT('SEK', 0.095), STRUCT('NZD', 0.60),
+            STRUCT('SGD', 0.75), STRUCT('HUF', 0.0027), STRUCT('CLP', 0.00105),
+            STRUCT('COP', 0.00024), STRUCT('CZK', 0.042), STRUCT('PLN', 0.25),
+            STRUCT('BRL', 0.19), STRUCT('MXN', 0.055), STRUCT('TRY', 0.031),
+            STRUCT('RUB', 0.011), STRUCT('ILS', 0.28), STRUCT('SAR', 0.267),
+            STRUCT('AED', 0.272), STRUCT('INR', 0.012), STRUCT('ZAR', 0.054),
+            STRUCT('RON', 0.22)
+        ])
+    )
+    SELECT
+        e.application_name,
+        e.month,
+        e.sku_id AS product_id,
+        e.product_title AS product_name,
+        'Purchase' AS sub_type,
+        CASE
+            WHEN LOWER(e.sku_id) LIKE '%monthly%' OR LOWER(e.sku_id) LIKE '%month%' THEN '1 Month'
+            WHEN LOWER(e.sku_id) LIKE '%quarterly%' OR LOWER(e.sku_id) LIKE '%quarter%' THEN '3 Months'
+            WHEN LOWER(e.sku_id) LIKE '%sixmonth%' OR LOWER(e.sku_id) LIKE '%6month%' THEN '6 Months'
+            WHEN LOWER(e.sku_id) LIKE '%yearly%' OR LOWER(e.sku_id) LIKE '%year%' OR LOWER(e.sku_id) LIKE '%annual%' THEN '1 Year'
+            ELSE 'Other'
+        END AS period,
+        COUNT(*) AS units,
+        ROUND(SUM(e.amount_buyer * COALESCE(fx.rate, 1.0)), 2) AS revenue_usd
+    FROM {T('d1_google_earnings')} e
+    LEFT JOIN fx_rates fx ON e.buyer_currency = fx.currency
+    WHERE e.transaction_type = 'Charge'
+      AND e.application_name IS NOT NULL
+    GROUP BY 1, 2, 3, 4, 5, 6
+    ORDER BY 1, 2, revenue_usd DESC
+    """
+    return run_query(sql)
+
+
 # ── Helpers ──
 def metric_card(label, value, sub=""):
     sub_html = (
@@ -282,13 +367,15 @@ try:
     fee_lookup = load_fee_lookup()
     apple_refunds = load_apple_refunds()
     google_refunds = load_google_refunds()
+    apple_products = load_apple_product_details()
+    google_products = load_google_product_details()
 except Exception as e:
     st.error(f"Failed to load data from BigQuery: {e}")
     st.stop()
 
 # Normalise Google app names to match Apple canonical names (case mismatches)
 _canon = {n.lower(): n for n in apple_raw["application_name"].unique() if n}
-for _df in [google_raw, google_refunds]:
+for _df in [google_raw, google_refunds, google_products]:
     if _df is not None and not _df.empty and "application_name" in _df.columns:
         _df["application_name"] = _df["application_name"].apply(
             lambda x: _canon.get(x.lower(), x) if isinstance(x, str) else x
@@ -622,6 +709,28 @@ if not month_data.empty:
         a_refund = row.get("Apple Refunds", 0)
         g_refund = row.get("Google Refunds", 0)
 
+        # Build product detail rows for this app + month
+        _prod_rows = []
+        for _src, _plat in [(apple_products, "Apple"), (google_products, "Google")]:
+            if _src is not None and not _src.empty:
+                _filt = _src[
+                    (_src["application_name"] == app)
+                    & (_src["month"] == selected_month)
+                ]
+                for _, _pr in _filt.sort_values(
+                    "revenue_usd", ascending=False
+                ).iterrows():
+                    _prod_rows.append(
+                        {
+                            "platform": _plat,
+                            "product_name": _pr.get("product_name", "—"),
+                            "sub_type": _pr.get("sub_type", "—"),
+                            "period": _pr.get("period", "—"),
+                            "units": int(_pr.get("units", 0)),
+                            "revenue_usd": float(_pr.get("revenue_usd", 0)),
+                        }
+                    )
+
         pdf_bytes = generate_receipt_pdf(
             app_name=app,
             month=selected_month,
@@ -633,6 +742,7 @@ if not month_data.empty:
             total_payout=t_payout,
             apple_refunds=a_refund,
             google_refunds=g_refund,
+            product_details=_prod_rows if _prod_rows else None,
         )
         safe_name = app.replace(" ", "_").replace("/", "_")
         filename = f"KLIQ_Receipt_{safe_name}_{selected_month}.pdf"
@@ -646,6 +756,113 @@ if not month_data.empty:
                 key=f"rcpt_{idx}_{selected_month}",
                 use_container_width=True,
             )
+    # ── Product Details (expandable) ──
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander(
+        f"📦 Product & Subscription Details — {selected_month}", expanded=False
+    ):
+        # Filter product data for selected month
+        _ap = (
+            apple_products[apple_products["month"] == selected_month].copy()
+            if not apple_products.empty
+            else pd.DataFrame()
+        )
+        _gp = (
+            google_products[google_products["month"] == selected_month].copy()
+            if not google_products.empty
+            else pd.DataFrame()
+        )
+
+        if selected_apps:
+            if not _ap.empty:
+                _ap = _ap[_ap["application_name"].isin(selected_apps)]
+            if not _gp.empty:
+                _gp = _gp[_gp["application_name"].isin(selected_apps)]
+
+        # Tag platform and combine
+        if not _ap.empty:
+            _ap["platform"] = "Apple"
+        if not _gp.empty:
+            _gp["platform"] = "Google"
+
+        _all_products = pd.concat([_ap, _gp], ignore_index=True)
+
+        if _all_products.empty:
+            st.info("No product details for this month.")
+        else:
+            apps_with_products = sorted(_all_products["application_name"].unique())
+            for app_name in apps_with_products:
+                app_prods = _all_products[_all_products["application_name"] == app_name]
+                total_rev = app_prods["revenue_usd"].sum()
+                total_units = app_prods["units"].sum()
+
+                st.markdown(
+                    f'<div style="background:{BG_CARD}; border-radius:12px; padding:14px 18px; '
+                    f'margin:8px 0 4px; box-shadow:{SHADOW_CARD};">'
+                    f'<span style="font-weight:700; color:{DARK}; font-size:15px;">{app_name}</span>'
+                    f'<span style="float:right; color:{NEUTRAL}; font-size:13px;">'
+                    f"{total_units} units &nbsp;·&nbsp; ${total_rev:,.2f} revenue</span></div>",
+                    unsafe_allow_html=True,
+                )
+
+                # Build HTML table for this app's products
+                prod_html = (
+                    '<table style="border-collapse:collapse; width:100%; font-family:Inter,sans-serif; '
+                    'font-size:12px; margin:0 0 12px;">'
+                    "<thead><tr>"
+                )
+                prod_cols = [
+                    "Platform",
+                    "Product",
+                    "Type",
+                    "Period",
+                    "Units",
+                    "Revenue (USD)",
+                ]
+                hdr_colors = {
+                    "Platform": DARK,
+                    "Product": DARK,
+                    "Type": DARK,
+                    "Period": DARK,
+                    "Units": DARK,
+                    "Revenue (USD)": DARK,
+                }
+                for pc in prod_cols:
+                    prod_html += (
+                        f'<th style="background:{DARK}; color:#fff; padding:6px 10px; '
+                        f'text-align:{"left" if pc in ("Platform","Product","Type","Period") else "right"}; '
+                        f'white-space:nowrap; border:1px solid #ddd; font-size:11px;">{pc}</th>'
+                    )
+                prod_html += "</tr></thead><tbody>"
+
+                for _, pr in app_prods.sort_values(
+                    "revenue_usd", ascending=False
+                ).iterrows():
+                    plat = pr["platform"]
+                    bg = APPLE_BG if plat == "Apple" else GOOGLE_BG
+                    plat_color = APPLE_COLOR if plat == "Apple" else GOOGLE_COLOR
+                    prod_name = pr.get("product_name", pr.get("product_id", "—"))
+                    sub_type = pr.get("sub_type", "—") or "—"
+                    period = pr.get("period", "—") or "—"
+                    units = int(pr["units"])
+                    rev = pr["revenue_usd"]
+
+                    prod_html += "<tr>"
+                    prod_html += (
+                        f'<td style="background:{bg}; padding:5px 10px; border:1px solid #eee; '
+                        f'white-space:nowrap; color:{plat_color}; font-weight:600;">'
+                        f'{"🍎" if plat == "Apple" else "🤖"} {plat}</td>'
+                    )
+                    prod_html += f'<td style="background:{bg}; padding:5px 10px; border:1px solid #eee;">{prod_name}</td>'
+                    prod_html += f'<td style="background:{bg}; padding:5px 10px; border:1px solid #eee;">{sub_type}</td>'
+                    prod_html += f'<td style="background:{bg}; padding:5px 10px; border:1px solid #eee;">{period}</td>'
+                    prod_html += f'<td style="background:{bg}; padding:5px 10px; border:1px solid #eee; text-align:right;">{units}</td>'
+                    prod_html += f'<td style="background:{bg}; padding:5px 10px; border:1px solid #eee; text-align:right; font-weight:600;">${rev:,.2f}</td>'
+                    prod_html += "</tr>"
+
+                prod_html += "</tbody></table>"
+                st.markdown(prod_html, unsafe_allow_html=True)
+
 else:
     st.info("No data for the selected month.")
 

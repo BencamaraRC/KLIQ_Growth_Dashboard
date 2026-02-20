@@ -59,6 +59,7 @@ def generate_receipt_pdf(
     payment_date=None,
     apple_refunds=0.0,
     google_refunds=0.0,
+    product_details=None,
 ):
     """Generate a branded PDF receipt. Returns bytes."""
     buf = io.BytesIO()
@@ -336,7 +337,75 @@ def generate_receipt_pdf(
     items_table.setStyle(TableStyle(style_cmds))
     elements.append(items_table)
 
-    elements.append(Spacer(1, 10 * mm))
+    elements.append(Spacer(1, 8 * mm))
+
+    # ── Product & Subscription Breakdown ──
+    if product_details and len(product_details) > 0:
+        elements.append(
+            Paragraph("PRODUCT &amp; SUBSCRIPTION BREAKDOWN", styles["SectionHeader"])
+        )
+        elements.append(Spacer(1, 2 * mm))
+
+        prod_rows = [
+            ["Platform", "Product", "Type", "Period", "Units", "Revenue"],
+        ]
+        for pd_row in product_details:
+            plat = pd_row.get("platform", "—")
+            prod_name = pd_row.get("product_name", "—") or "—"
+            sub_type = pd_row.get("sub_type", "—") or "—"
+            period = pd_row.get("period", "—") or "—"
+            units = int(pd_row.get("units", 0))
+            rev = pd_row.get("revenue_usd", 0.0)
+            prod_rows.append(
+                [plat, prod_name, sub_type, period, str(units), f"${rev:,.2f}"]
+            )
+
+        prod_col_widths = [22 * mm, 42 * mm, 22 * mm, 20 * mm, 16 * mm, 28 * mm]
+        prod_table = Table(prod_rows, colWidths=prod_col_widths)
+
+        prod_style = [
+            # Header
+            ("BACKGROUND", (0, 0), (-1, 0), KLIQ_GREEN),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ("TOPPADDING", (0, 0), (-1, 0), 6),
+            # Data rows
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+            ("TOPPADDING", (0, 1), (-1, -1), 4),
+            # Alignment
+            ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 0), (3, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            # Grid
+            ("LINEBELOW", (0, 0), (-1, 0), 0.5, KLIQ_GREEN),
+        ]
+
+        # Alternate row colours and platform-specific tinting
+        for ri in range(1, len(prod_rows)):
+            plat_val = prod_rows[ri][0]
+            if plat_val == "Apple":
+                bg = colors.HexColor("#EBF5FB")
+            elif plat_val == "Google":
+                bg = colors.HexColor("#E8F8F5")
+            else:
+                bg = colors.white
+            prod_style.append(("BACKGROUND", (0, ri), (-1, ri), bg))
+            prod_style.append(("LINEBELOW", (0, ri), (-1, ri), 0.3, KLIQ_BORDER))
+            # Colour the platform name
+            if plat_val == "Apple":
+                prod_style.append(("TEXTCOLOR", (0, ri), (0, ri), APPLE_BLUE))
+                prod_style.append(("FONTNAME", (0, ri), (0, ri), "Helvetica-Bold"))
+            elif plat_val == "Google":
+                prod_style.append(("TEXTCOLOR", (0, ri), (0, ri), GOOGLE_GREEN))
+                prod_style.append(("FONTNAME", (0, ri), (0, ri), "Helvetica-Bold"))
+
+        prod_table.setStyle(TableStyle(prod_style))
+        elements.append(prod_table)
+        elements.append(Spacer(1, 6 * mm))
 
     # ── Fee Note ──
     elements.append(
