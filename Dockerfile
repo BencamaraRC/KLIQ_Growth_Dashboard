@@ -15,17 +15,15 @@ COPY prospect-outreach/ ./prospect-outreach/
 COPY rcwl-development-0c013e9b5c2b.json ./rcwl-development-0c013e9b5c2b.json
 ENV GCP_SERVICE_ACCOUNT_KEY=/app/rcwl-development-0c013e9b5c2b.json
 
+# Copy startup script
+COPY start.sh ./start.sh
+RUN chmod +x start.sh
+
 # Expose Streamlit port
 EXPOSE 8080
 
 # Cloud Run sets PORT env var
 ENV PORT=8080
 
-# Run Streamlit
-CMD streamlit run streamlit_app/app.py \
-    --server.port=$PORT \
-    --server.address=0.0.0.0 \
-    --server.headless=true \
-    --browser.gatherUsageStats=false \
-    --server.enableCORS=false \
-    --server.enableXsrfProtection=false
+# Run both Streamlit and outreach engine
+CMD ["./start.sh"]
