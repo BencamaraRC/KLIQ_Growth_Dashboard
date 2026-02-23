@@ -18,6 +18,7 @@ from email_sender import send_email
 from cheat_sheet import generate_cheat_sheet
 from exclusions import is_excluded, refresh_active_apps
 from name_resolver import resolve_greeting
+from gsheet_leads import sync_sheet_leads
 
 
 def _enrich_greeting(profile):
@@ -195,7 +196,16 @@ def run_once():
     for e in events:
         process_event(e)
 
-    print(f"[DONE] Processed {len(signups)} sign-ups, {len(events)} events")
+    # 3. Sync Facebook leads from Google Sheet
+    try:
+        new_fb = sync_sheet_leads()
+    except Exception as e:
+        print(f"[GSHEET ERROR] {e}")
+        new_fb = 0
+
+    print(
+        f"[DONE] Processed {len(signups)} sign-ups, {len(events)} events, {new_fb} new FB leads"
+    )
 
 
 def run_loop():
