@@ -4,10 +4,17 @@ Reads leads from the shared Google Sheet and syncs them into the local SQLite tr
 """
 
 import re
+from datetime import datetime, timezone, timedelta
+from dateutil import parser as dtparser
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from config import SERVICE_ACCOUNT_KEY
-from tracker import upsert_fb_lead, get_fb_leads
+from config import SERVICE_ACCOUNT_KEY, DRY_RUN
+from tracker import upsert_fb_lead, get_fb_leads, fb_already_sent, record_fb_sent
+from sequences import render_email
+from email_sender import send_email
+
+# ── Delay before auto-sending email (hours) ──
+FB_EMAIL_DELAY_HOURS = 12
 
 # ── Sheet config ──
 FB_LEADS_SHEET_ID = "1D6ScYyqAbuRZCdx6jrOoTDH-5WlwvcH5UzokGsVrx6s"
@@ -165,3 +172,71 @@ def sync_sheet_leads():
 
     print(f"[GSHEET] Synced {len(leads)} leads ({new_count} new)")
     return new_count
+
+
+def _parse_lead_date(lead_date_str):
+    """Parse the lead_date string into a timezone-aware datetime."""
+    if not lead_date_str:
+        return None
+    try:
+        dt = dtparser.parse(lead_date_str)
+        # Make timezone-aware if naive
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def process_fb_leads():
+    """
+    Check all FB leads and auto-send the fb_new_lead email
+    if 12+ hours have passed since lead_date and email hasn't been sent yet.
+    Returns the number of emails sent this cycle.
+    """
+    leads = get_fb_leads(campaign="fb_new_lead")
+    if not leads:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    sent_count = 0
+
+    for lead in leads:
+        email = lead.get("email", "")
+        if not email or "@" not in email:
+            continue
+
+        # Skip if already sent
+        if fb_already_sent(email, "fb_new_lead", "email"):
+            continue
+
+        # Check 12-hour delay
+        lead_dt = _parse_lead_date(lead.get("lead_date", ""))
+        if not lead_dt:
+            # No valid date — skip (don't send without knowing when they signed up)
+            continue
+
+        hours_since = (now - lead_dt).total_seconds() / 3600
+        if hours_since < FB_EMAIL_DELAY_HOURS:
+            continue
+
+        # Build prospect dict for template rendering
+        first_name = lead.get("first_name", "").strip() or "Coach"
+        prospect = {
+            "first_name": first_name,
+            "name": first_name,
+            "email": email,
+        }
+
+        # Send the email
+        subject, body = render_email("fb_new_lead", prospect)
+        msg_id = send_email(email, subject, body)
+        record_fb_sent(email, "fb_new_lead", "email", email, msg_id)
+        sent_count += 1
+        print(
+            f"[FB AUTO-SEND] Email sent to {first_name} ({email}) — {hours_since:.1f}h after lead"
+        )
+
+    if sent_count:
+        print(f"[FB AUTO-SEND] Sent {sent_count} emails this cycle")
+    return sent_count

@@ -18,7 +18,7 @@ from email_sender import send_email
 from cheat_sheet import generate_cheat_sheet
 from exclusions import is_excluded, refresh_active_apps
 from name_resolver import resolve_greeting
-from gsheet_leads import sync_sheet_leads
+from gsheet_leads import sync_sheet_leads, process_fb_leads
 
 
 def _enrich_greeting(profile):
@@ -203,8 +203,15 @@ def run_once():
         print(f"[GSHEET ERROR] {e}")
         new_fb = 0
 
+    # 4. Auto-send emails to FB leads (12h delay after lead_date)
+    try:
+        fb_emails_sent = process_fb_leads()
+    except Exception as e:
+        print(f"[FB SEND ERROR] {e}")
+        fb_emails_sent = 0
+
     print(
-        f"[DONE] Processed {len(signups)} sign-ups, {len(events)} events, {new_fb} new FB leads"
+        f"[DONE] Processed {len(signups)} sign-ups, {len(events)} events, {new_fb} new FB leads, {fb_emails_sent} FB emails sent"
     )
 
 
