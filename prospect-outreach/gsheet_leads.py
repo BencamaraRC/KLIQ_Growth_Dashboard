@@ -231,11 +231,16 @@ def process_fb_leads():
         # Send the email
         subject, body = render_email("fb_new_lead", prospect)
         msg_id = send_email(email, subject, body)
-        record_fb_sent(email, "fb_new_lead", "email", email, msg_id)
-        sent_count += 1
-        print(
-            f"[FB AUTO-SEND] Email sent to {first_name} ({email}) — {hours_since:.1f}h after lead"
-        )
+        if msg_id:
+            record_fb_sent(email, "fb_new_lead", "email", email, msg_id)
+            sent_count += 1
+            print(
+                f"[FB AUTO-SEND] Email sent to {first_name} ({email}) — {hours_since:.1f}h after lead"
+            )
+        else:
+            print(
+                f"[FB AUTO-SEND] FAILED for {first_name} ({email}) — will retry next cycle"
+            )
 
     if sent_count:
         print(f"[FB AUTO-SEND] Sent {sent_count} emails this cycle")
