@@ -62,7 +62,7 @@ def _safe_get(row, idx, default=""):
 
 def fetch_sheet_leads():
     """
-    Read leads from both 'Meta' and 'Meta 2' sheets.
+    Read leads from the 'Meta 2' sheet.
     Returns a list of dicts with: first_name, last_name, email, phone, campaign, lead_date, niche.
     """
     service = _get_sheets_service()
@@ -72,41 +72,19 @@ def fetch_sheet_leads():
     all_leads = []
 
     try:
-        # ── Meta sheet (older leads, Oct 2025+) ──
-        result = service.spreadsheets().values().get(
-            spreadsheetId=FB_LEADS_SHEET_ID,
-            range="'Meta'!A1:Z500",
-        ).execute()
+        # ── Meta 2 sheet (active leads) ──
+        result = (
+            service.spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=FB_LEADS_SHEET_ID,
+                range="'Meta 2'!A1:Z500",
+            )
+            .execute()
+        )
         rows = result.get("values", [])
         if len(rows) > 1:
-            for row in rows[1:]:  # skip header
-                email = _safe_get(row, 13)
-                if not email or "@" not in email:
-                    continue
-                all_leads.append({
-                    "first_name": _safe_get(row, 14),
-                    "last_name": "",
-                    "email": email.lower(),
-                    "phone": _clean_phone(_safe_get(row, 15)),
-                    "campaign": "fb_new_lead",
-                    "lead_date": _safe_get(row, 1),
-                    "niche": _safe_get(row, 12),
-                    "platform": _safe_get(row, 11),
-                    "ad_name": _safe_get(row, 3),
-                    "campaign_name": _safe_get(row, 7),
-                    "source_sheet": "Meta",
-                })
-            print(f"[GSHEET] Meta sheet: {len(rows)-1} rows, {sum(1 for l in all_leads if l['source_sheet']=='Meta')} valid leads")
-
-        # ── Meta 2 sheet (newer leads, Feb 2026+) ──
-        result2 = service.spreadsheets().values().get(
-            spreadsheetId=FB_LEADS_SHEET_ID,
-            range="'Meta 2'!A1:Z500",
-        ).execute()
-        rows2 = result2.get("values", [])
-        if len(rows2) > 1:
-            meta2_count = 0
-            for row in rows2[1:]:
+            for row in rows[1:]:
                 email = _safe_get(row, 13)
                 if not email or "@" not in email:
                     # Meta 2 has a slightly different layout — email might be at index 12
@@ -114,35 +92,40 @@ def fetch_sheet_leads():
                     if not email or "@" not in email:
                         continue
                     # Shifted layout: email=12, first_name=13, phone=14
-                    all_leads.append({
-                        "first_name": _safe_get(row, 13),
-                        "last_name": "",
-                        "email": email.lower(),
-                        "phone": _clean_phone(_safe_get(row, 14)),
-                        "campaign": "fb_new_lead",
-                        "lead_date": _safe_get(row, 1),
-                        "niche": "",
-                        "platform": _safe_get(row, 11),
-                        "ad_name": _safe_get(row, 3),
-                        "campaign_name": _safe_get(row, 7),
-                        "source_sheet": "Meta 2",
-                    })
+                    all_leads.append(
+                        {
+                            "first_name": _safe_get(row, 13),
+                            "last_name": "",
+                            "email": email.lower(),
+                            "phone": _clean_phone(_safe_get(row, 14)),
+                            "campaign": "fb_new_lead",
+                            "lead_date": _safe_get(row, 1),
+                            "niche": "",
+                            "platform": _safe_get(row, 11),
+                            "ad_name": _safe_get(row, 3),
+                            "campaign_name": _safe_get(row, 7),
+                            "source_sheet": "Meta 2",
+                        }
+                    )
                 else:
-                    all_leads.append({
-                        "first_name": _safe_get(row, 14),
-                        "last_name": "",
-                        "email": email.lower(),
-                        "phone": _clean_phone(_safe_get(row, 15)),
-                        "campaign": "fb_new_lead",
-                        "lead_date": _safe_get(row, 1),
-                        "niche": _safe_get(row, 12),
-                        "platform": _safe_get(row, 11),
-                        "ad_name": _safe_get(row, 3),
-                        "campaign_name": _safe_get(row, 7),
-                        "source_sheet": "Meta 2",
-                    })
-                meta2_count += 1
-            print(f"[GSHEET] Meta 2 sheet: {len(rows2)-1} rows, {meta2_count} valid leads")
+                    all_leads.append(
+                        {
+                            "first_name": _safe_get(row, 14),
+                            "last_name": "",
+                            "email": email.lower(),
+                            "phone": _clean_phone(_safe_get(row, 15)),
+                            "campaign": "fb_new_lead",
+                            "lead_date": _safe_get(row, 1),
+                            "niche": _safe_get(row, 12),
+                            "platform": _safe_get(row, 11),
+                            "ad_name": _safe_get(row, 3),
+                            "campaign_name": _safe_get(row, 7),
+                            "source_sheet": "Meta 2",
+                        }
+                    )
+            print(
+                f"[GSHEET] Meta 2 sheet: {len(rows)-1} rows, {len(all_leads)} valid leads"
+            )
 
     except Exception as e:
         print(f"[GSHEET ERROR] Failed to read sheet: {e}")
