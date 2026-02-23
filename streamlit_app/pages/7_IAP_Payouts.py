@@ -684,7 +684,7 @@ if not month_data.empty:
     # ── Generate Receipt Buttons ──
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("##### 🧾 Generate Payout Receipts")
-    st.caption("Download a branded PDF receipt for any app's payout this month.")
+    st.caption("Click an app to generate and download its payout receipt.")
 
     # Build unit lookup from raw month_data (has total_units per platform)
     _units = {}
@@ -695,20 +695,12 @@ if not month_data.empty:
             _units[key] = {"Apple": 0, "Google": 0}
         _units[key][plat] = int(r.get("total_units", 0))
 
-    rcpt_cols = st.columns(4)
+    # Pre-build receipt params for each app (lightweight dicts, not PDF bytes)
+    _receipt_params = []
     for idx, (_, row) in enumerate(pivoted.iterrows()):
         app = row["App"]
-        kliq_pct = row.get("KLIQ %", 0)
-        a_sales = row.get("Apple Sales", 0)
-        g_sales = row.get("Google Sales", 0)
         units = _units.get(app, {"Apple": 0, "Google": 0})
 
-        t_payout = row.get("Total Payout", 0)
-
-        a_refund = row.get("Apple Refunds", 0)
-        g_refund = row.get("Google Refunds", 0)
-
-        # Build product detail rows for this app + month
         _prod_rows = []
         for _src, _plat in [(apple_products, "Apple"), (google_products, "Google")]:
             if _src is not None and not _src.empty:
@@ -730,31 +722,50 @@ if not month_data.empty:
                         }
                     )
 
-        pdf_bytes = generate_receipt_pdf(
-            app_name=app,
-            month=selected_month,
-            apple_sales=a_sales,
-            apple_units=units["Apple"],
-            google_sales=g_sales,
-            google_units=units["Google"],
-            kliq_fee_pct=kliq_pct,
-            total_payout=t_payout,
-            apple_refunds=a_refund,
-            google_refunds=g_refund,
-            product_details=_prod_rows if _prod_rows else None,
+        _receipt_params.append(
+            {
+                "app_name": app,
+                "month": selected_month,
+                "apple_sales": row.get("Apple Sales", 0),
+                "apple_units": units["Apple"],
+                "google_sales": row.get("Google Sales", 0),
+                "google_units": units["Google"],
+                "kliq_fee_pct": row.get("KLIQ %", 0),
+                "total_payout": row.get("Total Payout", 0),
+                "apple_refunds": row.get("Apple Refunds", 0),
+                "google_refunds": row.get("Google Refunds", 0),
+                "product_details": _prod_rows if _prod_rows else None,
+            }
         )
+
+    # Generate button: user picks an app, PDF is generated on click
+    rcpt_cols = st.columns(4)
+    for idx, params in enumerate(_receipt_params):
+        app = params["app_name"]
         safe_name = app.replace(" ", "_").replace("/", "_")
-        filename = f"KLIQ_Receipt_{safe_name}_{selected_month}.pdf"
+        btn_key = f"gen_rcpt_{idx}_{selected_month}"
 
         with rcpt_cols[idx % 4]:
+            if st.button(f"📄 {app}", key=btn_key, use_container_width=True):
+                st.session_state[f"_rcpt_gen_{selected_month}_{app}"] = params
+
+    # If a receipt was requested, generate and offer download
+    for params in _receipt_params:
+        app = params["app_name"]
+        ss_key = f"_rcpt_gen_{selected_month}_{app}"
+        if ss_key in st.session_state:
+            p = st.session_state[ss_key]
+            pdf_bytes = generate_receipt_pdf(**p)
+            safe_name = app.replace(" ", "_").replace("/", "_")
+            filename = f"KLIQ_Receipt_{safe_name}_{selected_month}.pdf"
             st.download_button(
-                label=f"📄 {app}",
+                label=f"⬇️ Download {app} Receipt",
                 data=pdf_bytes,
                 file_name=filename,
                 mime="application/pdf",
-                key=f"rcpt_{idx}_{selected_month}",
-                use_container_width=True,
+                key=f"dl_rcpt_{selected_month}_{app}",
             )
+            del st.session_state[ss_key]
     # ── Product Details (expandable) ──
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander(
