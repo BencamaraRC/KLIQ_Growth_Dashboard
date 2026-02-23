@@ -203,13 +203,12 @@ def run_once():
         print(f"[GSHEET ERROR] {e}")
         new_fb = 0
 
-    # 4. Auto-send emails to FB leads (DISABLED — re-enable when ready)
-    # try:
-    #     fb_emails_sent = process_fb_leads()
-    # except Exception as e:
-    #     print(f"[FB SEND ERROR] {e}")
-    #     fb_emails_sent = 0
-    fb_emails_sent = 0
+    # 4. Auto-send emails to FB leads (12h delay after lead_date)
+    try:
+        fb_emails_sent = process_fb_leads()
+    except Exception as e:
+        print(f"[FB SEND ERROR] {e}")
+        fb_emails_sent = 0
 
     print(
         f"[DONE] Processed {len(signups)} sign-ups, {len(events)} events, {new_fb} new FB leads, {fb_emails_sent} FB emails sent"
