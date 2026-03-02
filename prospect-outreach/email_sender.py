@@ -19,6 +19,8 @@ from config import (
     AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY,
     AWS_SES_REGION,
+    SES_FROM_EMAIL,
+    SES_FROM_NAME,
 )
 
 log = logging.getLogger("email_sender")
@@ -62,7 +64,7 @@ def _send_via_ses(to_email, subject, html_body, attachment_path=None):
 
             msg = MIMEMultipart("mixed")
             msg["Subject"] = subject
-            msg["From"] = f"{BREVO_FROM_NAME} <{BREVO_FROM_EMAIL}>"
+            msg["From"] = f"{SES_FROM_NAME} <{SES_FROM_EMAIL}>"
             msg["To"] = to_email
 
             body_part = MIMEText(html_body, "html")
@@ -78,13 +80,13 @@ def _send_via_ses(to_email, subject, html_body, attachment_path=None):
                 msg.attach(att)
 
             resp = client.send_raw_email(
-                Source=f"{BREVO_FROM_NAME} <{BREVO_FROM_EMAIL}>",
+                Source=f"{SES_FROM_NAME} <{SES_FROM_EMAIL}>",
                 Destinations=[to_email],
                 RawMessage={"Data": msg.as_string()},
             )
         else:
             resp = client.send_email(
-                Source=f"{BREVO_FROM_NAME} <{BREVO_FROM_EMAIL}>",
+                Source=f"{SES_FROM_NAME} <{SES_FROM_EMAIL}>",
                 Destination={"ToAddresses": [to_email]},
                 Message={
                     "Subject": {"Data": subject, "Charset": "UTF-8"},

@@ -32,6 +32,8 @@ EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "ses+brevo")
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 AWS_SES_REGION = os.getenv("AWS_SES_REGION", "eu-west-2")
+SES_FROM_EMAIL = os.getenv("SES_FROM_EMAIL", "ben@kliqmail.com")
+SES_FROM_NAME = os.getenv("SES_FROM_NAME", "Ben from KLIQ")
 
 # ── Brevo (email) ──
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
