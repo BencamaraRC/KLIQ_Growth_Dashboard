@@ -13,6 +13,7 @@ from tracker import upsert_fb_lead, get_fb_leads, fb_already_sent, record_fb_sen
 from sequences import render_email
 from email_sender import send_email
 from dedup_guard import email_already_delivered
+from brevo_contacts import sync_contact_from_fb_lead
 
 # ── Delay before auto-sending email (hours) ──
 FB_EMAIL_DELAY_HOURS = 12
@@ -170,6 +171,11 @@ def sync_sheet_leads():
         if was_new:
             new_count += 1
             existing.add(lead["email"].lower())
+            # Sync new lead to Brevo contact list with niche as coach_type
+            try:
+                sync_contact_from_fb_lead(lead)
+            except Exception as e:
+                print(f"[BREVO SYNC] Error for {lead['email']}: {e}")
 
     print(f"[GSHEET] Synced {len(leads)} leads ({new_count} new)")
     return new_count

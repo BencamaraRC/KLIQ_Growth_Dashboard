@@ -19,6 +19,7 @@ from cheat_sheet import generate_cheat_sheet
 from exclusions import is_excluded, refresh_active_apps
 from name_resolver import resolve_greeting
 from gsheet_leads import sync_sheet_leads, process_fb_leads
+from brevo_contacts import sync_contact_from_prospect, sync_contact
 
 
 def _enrich_greeting(profile):
@@ -77,6 +78,12 @@ def process_signup(signup):
         sms_body = render_sms("welcome", profile)
         msg_id = send_sms(phone, sms_body)
         record_sent(app_id, "welcome", "sms", phone, msg_id)
+
+    # Sync to Brevo contact list with coach_type
+    try:
+        sync_contact_from_prospect(profile)
+    except Exception as e:
+        print(f"[BREVO SYNC] Error for {email}: {e}")
 
     print(
         f"[SIGNUP] Processed: {name} → greeting='{profile['greeting_name']}' ({email}) phone={phone or 'N/A'} app_id={app_id}"
@@ -160,7 +167,7 @@ def process_event(event):
             msg_id = send_sms(phone, body)
             record_sent(app_id, "first_module", "sms", phone, msg_id)
 
-    # ── Coach type set → update profile ──
+    # ── Coach type set → update profile + sync Brevo ──
     elif step == "coach_type_set":
         try:
             data = json.loads(event.get("data", "{}"))
@@ -168,6 +175,14 @@ def process_event(event):
             country = data.get("country")
             if coach_type:
                 upsert_prospect(app_id, coach_type=coach_type, country=country)
+                # Update Brevo contact with the new coach_type
+                if email:
+                    sync_contact(
+                        email=email,
+                        coach_type=coach_type,
+                        country=country,
+                        source="kliq_signup",
+                    )
         except (json.JSONDecodeError, TypeError):
             pass
 
