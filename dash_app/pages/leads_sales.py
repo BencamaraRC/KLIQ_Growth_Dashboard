@@ -109,8 +109,8 @@ layout = html.Div(
                             display_format="DD/MM/YYYY",
                             clearable=True,
                             style={"fontSize": "12px"},
-                            placeholder_start_text="Start date",
-                            placeholder_end_text="End date",
+                            start_date_placeholder_text="Start date",
+                            end_date_placeholder_text="End date",
                         ),
                         html.Div(
                             id="ls-date-status",
