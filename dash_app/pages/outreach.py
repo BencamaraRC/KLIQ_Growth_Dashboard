@@ -101,6 +101,7 @@ try:
         get_all_bookings as _get_all_bookings,
         is_configured as _calendly_configured,
         mark_converted as _mark_converted,
+        update_call_status as _update_call_status,
     )
     from dedup_guard import (
         email_already_delivered as _email_delivered,
@@ -2661,13 +2662,38 @@ def _render_conversions():
             style={"color": NEUTRAL, "fontSize": "12px", "marginBottom": "8px"},
         )
     )
+    _CALL_STATUS_OPTIONS = [
+        {"label": "Booked", "value": "Booked"},
+        {"label": "Completed", "value": "Completed"},
+        {"label": "No Show", "value": "No Show"},
+        {"label": "Cancelled", "value": "Cancelled"},
+        {"label": "Rescheduled", "value": "Rescheduled"},
+        {"label": "Interested", "value": "Interested"},
+        {"label": "Not Interested", "value": "Not Interested"},
+        {"label": "Closed Won", "value": "Closed Won"},
+        {"label": "Closed Lost", "value": "Closed Lost"},
+    ]
+    _STATUS_COLORS = {
+        "Booked": "#2E86C1",
+        "Completed": GREEN,
+        "No Show": "#DC2626",
+        "Cancelled": NEUTRAL,
+        "Rescheduled": TANGERINE,
+        "Interested": "#2E86C1",
+        "Not Interested": NEUTRAL,
+        "Closed Won": GREEN,
+        "Closed Lost": "#DC2626",
+    }
     sections.append(html.Div(id="conversion-update-status"))
+    sections.append(html.Div(id="call-status-update-status"))
     if bookings:
         booking_table_rows = []
         for b in bookings[:100]:
             bid = b.get("id", 0)
             converted = b.get("converted_to_sale", 0)
             converted_at = b.get("converted_at") or ""
+            current_status = b.get("call_status") or "Booked"
+            status_color = _STATUS_COLORS.get(current_status, NEUTRAL)
             booking_table_rows.append(
                 html.Tr(
                     [
@@ -2711,6 +2737,20 @@ def _render_conversions():
                             style={"fontSize": "11px"},
                         ),
                         html.Td(
+                            dcc.Dropdown(
+                                id={"type": "call-status-dropdown", "index": bid},
+                                options=_CALL_STATUS_OPTIONS,
+                                value=current_status,
+                                clearable=False,
+                                style={
+                                    "fontSize": "11px",
+                                    "minWidth": "130px",
+                                    "color": status_color,
+                                },
+                            ),
+                            style={"minWidth": "140px", "padding": "2px 4px"},
+                        ),
+                        html.Td(
                             html.Span(
                                 "✅ Sale" if converted else "—",
                                 style={
@@ -2726,7 +2766,19 @@ def _render_conversions():
                         ),
                     ],
                     style={
-                        "backgroundColor": "#F0FFF4" if converted else "transparent",
+                        "backgroundColor": (
+                            "#F0FFF4"
+                            if current_status == "Closed Won"
+                            else (
+                                "#FFF5F5"
+                                if current_status in ("No Show", "Closed Lost")
+                                else (
+                                    "#FFFFF0"
+                                    if current_status == "Interested"
+                                    else "transparent"
+                                )
+                            )
+                        ),
                     },
                 )
             )
@@ -2744,7 +2796,8 @@ def _render_conversions():
                                     html.Th("Event Type"),
                                     html.Th("Campaign"),
                                     html.Th("Channel"),
-                                    html.Th("Status"),
+                                    html.Th("Call Status", style={"minWidth": "140px"}),
+                                    html.Th("Result"),
                                     html.Th("Converted"),
                                 ],
                                 style={"backgroundColor": "#F2F3EE"},
@@ -2902,6 +2955,54 @@ def toggle_sale_conversion(values):
                 f"↩️ Booking #{booking_id} unmarked — not a sale.",
                 style={"color": NEUTRAL, "fontSize": "12px"},
             )
+    except Exception as e:
+        return html.Span(
+            f"❌ Error: {str(e)[:80]}",
+            style={"color": "#DC2626", "fontSize": "12px"},
+        )
+
+
+# ── Call Status Dropdown ──
+@callback(
+    Output("call-status-update-status", "children"),
+    Input({"type": "call-status-dropdown", "index": ALL}, "value"),
+    prevent_initial_call=True,
+)
+def update_call_status_cb(values):
+    """Update call status when dropdown is changed."""
+    if not _OUTREACH_AVAILABLE:
+        return no_update
+    triggered = ctx.triggered_id
+    if not triggered or not isinstance(triggered, dict):
+        return no_update
+    booking_id = triggered.get("index")
+    if not booking_id:
+        return no_update
+    new_status = None
+    for t in ctx.triggered:
+        if t.get("value") is not None:
+            new_status = t["value"]
+            break
+    if not new_status:
+        return no_update
+    try:
+        _update_call_status(booking_id, new_status)
+        _DISPLAY_COLORS = {
+            "Booked": "#2E86C1",
+            "Completed": GREEN,
+            "No Show": "#DC2626",
+            "Cancelled": NEUTRAL,
+            "Rescheduled": TANGERINE,
+            "Interested": "#2E86C1",
+            "Not Interested": NEUTRAL,
+            "Closed Won": GREEN,
+            "Closed Lost": "#DC2626",
+        }
+        color = _DISPLAY_COLORS.get(new_status, NEUTRAL)
+        return html.Span(
+            f"✅ Booking #{booking_id} → {new_status}",
+            style={"color": color, "fontSize": "12px", "fontWeight": "600"},
+        )
     except Exception as e:
         return html.Span(
             f"❌ Error: {str(e)[:80]}",

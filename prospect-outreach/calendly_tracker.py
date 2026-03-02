@@ -149,7 +149,8 @@ def _get_db():
             matched_campaign TEXT,
             matched_channel TEXT,
             converted_to_sale INTEGER DEFAULT 0,
-            converted_at TEXT
+            converted_at TEXT,
+            call_status TEXT DEFAULT 'Booked'
         )
     """
     )
@@ -162,6 +163,12 @@ def _get_db():
         pass
     try:
         conn.execute("ALTER TABLE calendly_bookings ADD COLUMN converted_at TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute(
+            "ALTER TABLE calendly_bookings ADD COLUMN call_status TEXT DEFAULT 'Booked'"
+        )
     except Exception:
         pass
     conn.commit()
@@ -258,6 +265,18 @@ def mark_converted(booking_id, converted=True):
     conn.execute(
         "UPDATE calendly_bookings SET converted_to_sale = ?, converted_at = ? WHERE id = ?",
         (1 if converted else 0, converted_at, booking_id),
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def update_call_status(booking_id, status):
+    """Update the call status for a booking."""
+    conn = _get_db()
+    conn.execute(
+        "UPDATE calendly_bookings SET call_status = ? WHERE id = ?",
+        (status, booking_id),
     )
     conn.commit()
     conn.close()
