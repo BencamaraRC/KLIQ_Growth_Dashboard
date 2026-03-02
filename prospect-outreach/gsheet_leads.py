@@ -12,6 +12,7 @@ from config import SERVICE_ACCOUNT_KEY, DRY_RUN
 from tracker import upsert_fb_lead, get_fb_leads, fb_already_sent, record_fb_sent
 from sequences import render_email
 from email_sender import send_email
+from dedup_guard import email_already_delivered
 
 # ── Delay before auto-sending email (hours) ──
 FB_EMAIL_DELAY_HOURS = 12
@@ -206,8 +207,13 @@ def process_fb_leads():
         if not email or "@" not in email:
             continue
 
-        # Skip if already sent
+        # Skip if already sent (local DB)
         if fb_already_sent(email, "fb_new_lead", "email"):
+            continue
+
+        # Skip if already sent (Brevo API — survives DB resets)
+        if email_already_delivered(email):
+            record_fb_sent(email, "fb_new_lead", "email", email, "dedup_brevo")
             continue
 
         # Check 12-hour delay

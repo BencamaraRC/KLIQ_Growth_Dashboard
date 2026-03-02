@@ -498,7 +498,7 @@ def generate_cheat_sheet(prospect, output_path=None):
 
     elements.append(
         Paragraph(
-            "KLIQ — The all-in-one platform for coaches | joinkliq.io",
+            "Remote Coach Ltd Trading as KLIQ | joinkliq.io",
             footer_style,
         )
     )

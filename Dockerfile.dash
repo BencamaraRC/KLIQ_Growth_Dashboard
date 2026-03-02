@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY dash_app/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy Dash app code
+COPY dash_app/ ./
+
+# Copy prospect-outreach module (used by outreach page)
+COPY prospect-outreach/ ./prospect-outreach/
+
+# Copy service account key for BigQuery access
+COPY rcwl-development-0c013e9b5c2b.json ./rcwl-development-0c013e9b5c2b.json
+ENV GCP_SERVICE_ACCOUNT_KEY=/app/rcwl-development-0c013e9b5c2b.json
+
+# Expose port
+EXPOSE 8080
+
+# Cloud Run sets PORT env var
+ENV PORT=8080
+
+# Run with gunicorn for production
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--threads", "4", "--timeout", "120", "app:server"]

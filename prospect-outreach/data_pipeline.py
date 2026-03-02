@@ -109,7 +109,14 @@ def _lookup_phone(client, email):
 
 def fetch_all_phones():
     """
-    Fetch all prospects with valid phone numbers from prod_dataset.applications.
+    Fetch coaches with valid phone numbers who genuinely created an app.
+
+    Filters:
+      - Must have a self_serve_completed event (proof they went through signup)
+      - Excludes @joinkliq.io internal/test accounts
+      - Excludes apps with active Stripe subscriptions (already paying)
+      - Never includes end-users (they live in the 'users' table, not 'applications')
+
     Returns list of dicts with: application_id, application_name, phone_number, email, created_at.
     """
     client = get_client()
@@ -124,6 +131,20 @@ def fetch_all_phones():
     WHERE a.phone_number IS NOT NULL
       AND a.phone_number != 'NULL'
       AND a.phone_number != ''
+      -- Must have completed self-serve signup (real coach, not API-created)
+      AND EXISTS (
+          SELECT 1 FROM `{DATA_PROJECT}.prod_dataset.events` e
+          WHERE e.application_id = a.id
+            AND e.event_name = 'self_serve_completed'
+      )
+      -- Exclude internal/test accounts
+      AND LOWER(a.email) NOT LIKE '%@joinkliq.io'
+      -- Exclude already-paying customers
+      AND a.id NOT IN (
+          SELECT DISTINCT application_id
+          FROM `{DATA_PROJECT}.prod_dataset.subscription_details`
+          WHERE status = 'active'
+      )
     ORDER BY a.created_at DESC
     """
     df = client.query(sql).to_dataframe()

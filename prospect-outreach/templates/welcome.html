@@ -4,28 +4,21 @@
 
 <p>It's Ben from KLIQ — just wanted to personally welcome you.</p>
 
-<p>Your coaching app is set up and ready to go. There are <strong>5 quick steps</strong> between you and earning your
-    first dollar on KLIQ:</p>
+<p>Your coaching app is set up and ready to go. Here are the steps to get you earning your first dollar:</p>
 
-<ol>
+<p>
     {% for step in remaining %}
-    <li>{{ step }}</li>
+    {{ loop.index }}. {{ step }}<br>
     {% endfor %}
-</ol>
+</p>
 
-<p>That's it — <strong>{{ remaining_count }} step{{ 's' if remaining_count != 1 else '' }}</strong> and you're live and
-    ready to earn.</p>
+<p>That's {{ remaining_count }} step{{ 's' if remaining_count != 1 else '' }} and you're live. Most coaches who finish
+    within 48 hours see their first subscriber that same week.</p>
 
-<p>You can finish setting up your store right now — just head to <a
-        href="https://admin.joinkliq.io/">admin.joinkliq.io</a> and pick up where you left off.</p>
+<p>Head to admin.joinkliq.io to pick up where you left off.</p>
 
-<p>Most coaches who complete these within the first 48 hours see their first subscriber within the week.</p>
-
-<p>If you'd rather we just did it for you — we have a white-glove service where my team sets everything up, creates your
-    first program, and gets you launch-ready. Happy to jump on a quick call if that sounds easier: <a
-        href="https://calendly.com/joinkliq/kliq-pp-shortlist">book here</a>.</p>
-
-<p>Either way, I'm here if you need anything. Just hit reply.</p>
+<p>If you'd rather we just did it for you — my team can handle the full setup. Just reply to this email and I'll get it
+    sorted.</p>
 
 <p>Ben</p>
 {% endblock %}

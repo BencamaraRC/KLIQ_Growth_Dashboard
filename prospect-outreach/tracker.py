@@ -36,10 +36,21 @@ def _get_db():
             country TEXT,
             signup_date TEXT,
             profile_json TEXT,
-            updated_at TEXT
+            updated_at TEXT,
+            deal_status TEXT DEFAULT 'New',
+            deal_amount REAL DEFAULT 0
         )
     """
     )
+    # Migrate: add columns if table already exists without them
+    try:
+        conn.execute("ALTER TABLE prospects ADD COLUMN deal_status TEXT DEFAULT 'New'")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE prospects ADD COLUMN deal_amount REAL DEFAULT 0")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS fb_leads (
@@ -54,6 +65,22 @@ def _get_db():
             status TEXT DEFAULT 'new',
             created_at TEXT,
             UNIQUE(email, campaign)
+        )
+    """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS calendly_bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_uri TEXT UNIQUE NOT NULL,
+            event_type_slug TEXT,
+            invitee_email TEXT NOT NULL,
+            invitee_name TEXT,
+            event_start TEXT,
+            event_status TEXT DEFAULT 'active',
+            created_at TEXT,
+            matched_campaign TEXT,
+            matched_channel TEXT
         )
     """
     )
@@ -130,6 +157,18 @@ def upsert_prospect(
     )
     conn.commit()
     conn.close()
+
+
+def update_prospect_deal(application_id, deal_status, deal_amount=None):
+    """Update the deal status and amount for a prospect."""
+    conn = _get_db()
+    conn.execute(
+        "UPDATE prospects SET deal_status = ?, deal_amount = ?, updated_at = ? WHERE application_id = ?",
+        (deal_status, deal_amount or 0, datetime.utcnow().isoformat(), application_id),
+    )
+    conn.commit()
+    conn.close()
+    return True
 
 
 def get_prospect(application_id):
