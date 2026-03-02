@@ -27,6 +27,8 @@ log = logging.getLogger("email_sender")
 
 BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
 OUTREACH_TAG = "kliq-outreach"
+REPLY_TO_EMAIL = "ben@joinkliq.io"
+REPLY_TO_NAME = "Ben from KLIQ"
 
 # ── Lazy SES client ──
 _ses_client = None
@@ -65,6 +67,7 @@ def _send_via_ses(to_email, subject, html_body, attachment_path=None):
             msg = MIMEMultipart("mixed")
             msg["Subject"] = subject
             msg["From"] = f"{SES_FROM_NAME} <{SES_FROM_EMAIL}>"
+            msg["Reply-To"] = f"{REPLY_TO_NAME} <{REPLY_TO_EMAIL}>"
             msg["To"] = to_email
 
             body_part = MIMEText(html_body, "html")
@@ -88,6 +91,7 @@ def _send_via_ses(to_email, subject, html_body, attachment_path=None):
             resp = client.send_email(
                 Source=f"{SES_FROM_NAME} <{SES_FROM_EMAIL}>",
                 Destination={"ToAddresses": [to_email]},
+                ReplyToAddresses=[REPLY_TO_EMAIL],
                 Message={
                     "Subject": {"Data": subject, "Charset": "UTF-8"},
                     "Body": {"Html": {"Data": html_body, "Charset": "UTF-8"}},
@@ -116,6 +120,7 @@ def _send_via_brevo(to_email, subject, html_body, attachment_path=None):
         "subject": subject,
         "htmlContent": html_body,
         "tags": [OUTREACH_TAG],
+        "replyTo": {"email": REPLY_TO_EMAIL, "name": REPLY_TO_NAME},
     }
 
     if attachment_path:
