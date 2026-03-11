@@ -274,14 +274,7 @@ def generate_receipt_pdf(
     line_items.append(["", "", "Subtotal", fmt(subtotal)])
 
     # Platform Fees
-    if is_fiscal and apple_platform_fee_pct is not None:
-        fee_label = f"Platform Fees (Apple {apple_platform_fee_pct:.1f}%"
-        if google_sales > 0:
-            fee_label += " + Google 30%"
-        fee_label += ")"
-    else:
-        fee_label = "Platform Fees (30%)"
-    line_items.append(["", "", fee_label, f"-{fmt(platform_fees)}"])
+    line_items.append(["", "", "Platform Fees", f"-{fmt(platform_fees)}"])
 
     # KLIQ Fee
     line_items.append(
