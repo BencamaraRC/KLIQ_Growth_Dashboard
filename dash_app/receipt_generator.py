@@ -60,6 +60,14 @@ def generate_receipt_pdf(
     apple_refunds=0.0,
     google_refunds=0.0,
     product_details=None,
+    # Fiscal settlement params
+    is_fiscal=False,
+    fiscal_period=None,
+    period_start=None,
+    period_end=None,
+    apple_platform_fee=None,
+    apple_platform_fee_pct=None,
+    payment_due_date=None,
 ):
     """Generate a branded PDF receipt. Returns bytes."""
     buf = io.BytesIO()
@@ -144,12 +152,28 @@ def generate_receipt_pdf(
     subtotal = apple_sales + google_sales
     kliq_fee = round(subtotal * kliq_fee_pct / 100, 2)
     total_refunds = round(apple_refunds + google_refunds, 2)
-    platform_fees = round(subtotal * 0.30, 2)
-    # total_payout comes from the table (after platform fees + KLIQ fee + refunds)
 
-    invoice_num = _generate_invoice_number(app_name, month)
-    if not payment_date:
+    if is_fiscal and apple_platform_fee is not None:
+        google_fee = round(google_sales * 0.30, 2) if google_sales > 0 else 0.0
+        platform_fees = round(apple_platform_fee + google_fee, 2)
+    else:
+        platform_fees = round(subtotal * 0.30, 2)
+
+    if is_fiscal and fiscal_period:
+        invoice_num = _generate_invoice_number(app_name, f"fiscal_{fiscal_period}")
+    else:
+        invoice_num = _generate_invoice_number(app_name, month)
+
+    if is_fiscal and payment_due_date:
+        payment_date = payment_due_date
+    elif not payment_date:
         payment_date = f"10th of month following {month}"
+
+    # Display date range for the detail section
+    if is_fiscal and period_start and period_end:
+        display_date_range = f"{period_start} - {period_end}"
+    else:
+        display_date_range = month
 
     # ── Header: KLIQ branding + company info ──
     header_data = [
@@ -180,9 +204,10 @@ def generate_receipt_pdf(
     )
 
     # ── Invoice Details ──
-    elements.append(
-        Paragraph("IN-APP PURCHASE PAYOUT RECEIPT", styles["SectionHeader"])
+    receipt_title = (
+        "PAYOUT RECEIPT (SETTLEMENT)" if is_fiscal else "IN-APP PURCHASE PAYOUT RECEIPT"
     )
+    elements.append(Paragraph(receipt_title, styles["SectionHeader"]))
 
     detail_data = [
         [
@@ -194,7 +219,7 @@ def generate_receipt_pdf(
         [
             Paragraph(app_name, styles["FieldValue"]),
             Paragraph(invoice_num, styles["FieldValue"]),
-            Paragraph(month, styles["FieldValue"]),
+            Paragraph(display_date_range, styles["FieldValue"]),
             Paragraph(str(payment_date), styles["FieldValue"]),
         ],
     ]
@@ -248,8 +273,15 @@ def generate_receipt_pdf(
     # Subtotal (gross sales)
     line_items.append(["", "", "Subtotal", fmt(subtotal)])
 
-    # Platform Fees (30%)
-    line_items.append(["", "", "Platform Fees (30%)", f"-{fmt(platform_fees)}"])
+    # Platform Fees
+    if is_fiscal and apple_platform_fee_pct is not None:
+        fee_label = f"Platform Fees (Apple {apple_platform_fee_pct:.1f}%"
+        if google_sales > 0:
+            fee_label += " + Google 30%"
+        fee_label += ")"
+    else:
+        fee_label = "Platform Fees (30%)"
+    line_items.append(["", "", fee_label, f"-{fmt(platform_fees)}"])
 
     # KLIQ Fee
     line_items.append(
@@ -427,6 +459,15 @@ def generate_receipt_pdf(
             notes_style,
         )
     )
+
+    if is_fiscal:
+        elements.append(Spacer(1, 3 * mm))
+        elements.append(
+            Paragraph(
+                "Based on Apple Financial Reports (actual settlement amounts).",
+                notes_style,
+            )
+        )
 
     elements.append(Spacer(1, 15 * mm))
 
