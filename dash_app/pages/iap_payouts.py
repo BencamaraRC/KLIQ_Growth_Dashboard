@@ -396,17 +396,32 @@ layout = html.Div(
         ),
         html.Hr(),
         # Data View Toggle
-        dbc.RadioItems(
-            id="iap-view-toggle",
-            options=[
-                {"label": " Calendar Month", "value": "calendar"},
-                {"label": " Apple Fiscal Period", "value": "fiscal"},
+        html.Div(
+            [
+                dbc.Label(
+                    "Data View",
+                    style={"fontWeight": "600", "fontSize": "13px", "marginRight": "12px"},
+                ),
+                dbc.RadioItems(
+                    id="iap-view-toggle",
+                    options=[
+                        {"label": "Calendar Month", "value": "calendar"},
+                        {"label": "Apple Fiscal Period", "value": "fiscal"},
+                    ],
+                    value="calendar",
+                    inline=True,
+                    input_style={"marginRight": "4px"},
+                    label_style={"marginRight": "20px", "fontSize": "13px"},
+                ),
             ],
-            value="calendar",
-            inline=True,
-            style={"fontSize": "13px", "marginBottom": "16px"},
-            inputStyle={"marginRight": "4px"},
-            labelStyle={"marginRight": "20px"},
+            style={
+                "display": "flex",
+                "alignItems": "center",
+                "marginBottom": "16px",
+                "padding": "10px 16px",
+                "backgroundColor": "#F2F3EE",
+                "borderRadius": "8px",
+            },
         ),
         # Filters
         dbc.Row(
